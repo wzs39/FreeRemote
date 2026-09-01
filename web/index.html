@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#10131c">
+<link rel="manifest" href="/manifest.json">
+<title>FreeRemote 远程控制 v2.3</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; background: #0d0f14; color: #e6e9ef;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    overscroll-behavior: none; }
+  body { display: grid; height: 100%;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas: "top" "stage" "side"; }
+  #topbar { grid-area: top; }
+  #stage { grid-area: stage; }
+  #side { grid-area: side; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+
+  /* 横屏：监看区占左侧，控制/键盘/文件集成到右侧面板，拇指更好操作 */
+  @media (orientation: landscape) {
+    body { grid-template-columns: 1fr minmax(320px, 40vw);
+      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-areas: "top top" "stage side"; }
+    #side { border-left: 1px solid #232936; }
+  }
+
+  /* 顶部状态栏 */
+  #topbar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; background: #14171f; border-bottom: 1px solid #232936;
+    font-size: 13px; }
+  #topbar .dot { width: 8px; height: 8px; border-radius: 50%; background: #f0b429; flex: none; }
+  #topbar .dot.ok { background: #2ecc71; }
+  #topbar .dot.bad { background: #e74c3c; }
+  #topbar .spacer { flex: 1; }
+  #b-doctor, #b-files, #b-set { border: 1px solid #232936; background: #1d222e; color: #9aa4b8;
+    padding: 7px 12px; font-size: 13px; border-radius: 8px; cursor: pointer; flex: none; }
+  #b-set:active, #b-files:active, #b-doctor:active { background: #2b6df6; color: #fff; }
+  .ver { font-size: 10px; color: #555d6e; flex: none; }
+
+  /* 文件互传面板 */
+  #filepanel { flex: 0 0 auto; background: #14171f; border-top: 1px solid #232936;
+    padding: 8px; display: none; max-height: 45vh; flex-direction: column; }
+  #filepanel.show { display: flex; }
+  .fp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .fp-head button { padding: 7px 12px; border: 1px solid #232936; border-radius: 8px;
+    background: #1d222e; color: #e6e9ef; font-size: 13px; flex: none; }
+  .fp-path { flex: 1; min-width: 0; font-size: 12px; color: #9aa4b8;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fp-list { flex: 1; overflow-y: auto; margin-bottom: 8px; }
+  .fp-row { display: flex; align-items: center; gap: 8px; padding: 12px 8px;
+    border-bottom: 1px solid #1a1f2b; font-size: 14px; cursor: pointer; touch-action: manipulation; }
+  .fp-row:active { background: #1d222e; }
+  .fp-size { margin-left: auto; color: #9aa4b8; font-size: 12px; flex: none; }
+  .fp-msg { font-size: 12px; color: #9aa4b8; padding: 8px 6px; }
+  .fp-err { font-size: 12px; color: #e74c3c; padding: 8px 6px; }
+  .fp-up2 { display: flex; gap: 8px; align-items: center; }
+  #fp-input { flex: 1; min-width: 0; font-size: 12px; color: #9aa4b8; }
+  #fp-send { padding: 9px 16px; border: 0; border-radius: 8px; background: #2b6df6;
+    color: #fff; font-size: 14px; }
+  #fp-progress { display: flex; align-items: center; gap: 8px; margin-top: 8px;
+    font-size: 12px; color: #9aa4b8; }
+  #fp-progress[hidden] { display: none; }
+  #fp-bar { flex: 1; height: 8px; border-radius: 4px; background: #1d222e; overflow: hidden; }
+  #fp-bar i { display: block; height: 100%; width: 0%; background: #2b6df6; border-radius: 4px; }
+  #fp-name { max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .seg { display: flex; background: #1d222e; border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; color: #9aa4b8; padding: 5px 9px;
+    font-size: 12px; cursor: pointer; }
+  .seg button.on { background: #2b6df6; color: #fff; }
+
+  /* 屏幕监看区 */
+  #stage { flex: 1 1 auto; position: relative; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #0d0f14; touch-action: none; }
+  #wrap { position: relative; width: 100%; height: 100%; display: flex;
+    align-items: center; justify-content: center; }
+  #screen { max-width: 100%; max-height: 100%; object-fit: contain;
+    user-select: none; -webkit-user-select: none; touch-action: none; }
+  #vwrap { position: relative; display: none; line-height: 0; }
+  #vwrap.show { display: block; }
+  #vcanvas { display: block; touch-action: none; }
+  #ccursor { position: absolute; left: 0; top: 0; pointer-events: none; }
+
+  /* 底部工具栏 */
+  #toolbar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
+    padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: #14171f;
+    border-top: 1px solid #232936; }
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .row button { min-width: 0; min-height: 58px; padding: 8px 4px; border: 1px solid #232936;
+    border-radius: 12px; background: #1d222e; color: #e6e9ef; font-size: 16px; font-weight: 500;
+    cursor: pointer; touch-action: manipulation; }
+  .row button:active { background: #2b6df6; }
+  .row button.mod.on { background: #2b6df6; border-color: #2b6df6; }
+  .row button.warn:active { background: #c0392b; }
+
+  /* 虚拟键盘面板 */
+  #kbpanel { flex: 0 0 auto; background: #14171f; border-top: 1px solid #232936;
+    padding: 8px; display: none; }
+  #kbpanel.show { display: flex; flex-direction: column; gap: 6px; }
+  #kbline { display: flex; gap: 8px; }
+  #kb-input { flex: 1 1 auto; min-width: 0; min-height: 54px; padding: 12px; border-radius: 10px;
+    border: 2px solid #2b6df6; background: #1d222e; color: #fff; font-size: 18px; }
+  #kbline button { flex: 0 0 auto; min-width: 84px; min-height: 54px; border-radius: 10px; border: 0;
+    background: #2b6df6; color: #fff; font-size: 17px; }
+  #kbkeys, #kbcombo { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+  #kbcombo { grid-template-columns: repeat(3, 1fr); }
+  #kbkeys button, #kbcombo button { min-height: 54px; border: 1px solid #232936; border-radius: 10px;
+    background: #1d222e; color: #e6e9ef; font-size: 16px; font-weight: 500; cursor: pointer;
+    touch-action: manipulation; }
+  #kbkeys button:active, #kbcombo button:active { background: #2b6df6; }
+  #kbcombo button { color: #bcd0ff; }
+  @media (orientation: landscape) {
+    #kbkeys { grid-template-columns: repeat(4, 1fr); }
+    #kbcombo { grid-template-columns: repeat(5, 1fr); }
+  }
+
+  /* 单手模式：工具栏贴底覆盖，拇指更好够到 */
+  body.onehand #toolbar { position: fixed; left: 8px; right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 45;
+    background: rgba(20,23,31,.97); border: 1px solid #2b6df6; border-radius: 14px;
+    box-shadow: 0 6px 22px rgba(0,0,0,.5); }
+  body.onehand #wrap { margin-bottom: 148px; }
+  body.onehand #filepanel { padding-bottom: 148px; }
+  body.onehand #kbpanel { padding-bottom: 148px; }
+
+  /* 设置面板 */
+  #setpanel { position: fixed; inset: 0; z-index: 55; background: rgba(10,12,16,.92);
+    display: flex; align-items: center; justify-content: center; }
+  #setpanel[hidden] { display: none; }
+  #setpanel .box { width: min(340px, 90vw); background: #161a23; border: 1px solid #232936;
+    border-radius: 14px; padding: 20px; }
+  #setpanel h2 { font-size: 17px; margin-bottom: 14px; }
+  #setpanel .set-row { display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin-bottom: 14px; font-size: 14px; }
+  #setpanel .seg button { min-height: 38px; padding: 0 14px; border: 0; background: transparent;
+    color: #9aa4b8; font-size: 14px; cursor: pointer; }
+  #setpanel .seg button.on { background: #2b6df6; color: #fff; }
+  #setpanel .toggle { min-width: 72px; min-height: 40px; border-radius: 10px; border: 1px solid #232936;
+    background: #1d222e; color: #9aa4b8; font-size: 14px; cursor: pointer; }
+  #setpanel .toggle.on { background: #2b6df6; color: #fff; border-color: #2b6df6; }
+  #set-close { width: 100%; padding: 12px; border: 0; border-radius: 10px;
+    background: #2b6df6; color: #fff; font-size: 15px; margin-top: 4px; }
+
+  /* 横屏提示 */
+  #rot { position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%); z-index: 60;
+    background: rgba(245,179,41,.95); color: #1a1a1a; padding: 10px 18px; border-radius: 22px;
+    font-size: 14px; font-weight: 600; box-shadow: 0 4px 14px rgba(0,0,0,.45); cursor: pointer; }
+  #rot[hidden] { display: none; }
+
+  /* 口令输入遮罩 */
+  #auth { position: fixed; inset: 0; z-index: 50; background: rgba(10,12,16,.92);
+    display: flex; align-items: center; justify-content: center; }
+  #auth[hidden] { display: none; }
+  #auth .box { width: min(320px, 86vw); background: #161a23; border: 1px solid #232936;
+    border-radius: 14px; padding: 22px; }
+  #auth h2 { font-size: 17px; margin-bottom: 6px; }
+  #auth p { font-size: 12px; color: #9aa4b8; margin-bottom: 12px; }
+  #auth input { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #2b6df6;
+    background: #1d222e; color: #fff; font-size: 15px; margin-bottom: 10px; }
+  #auth button { width: 100%; padding: 11px; border: 0; border-radius: 8px;
+    background: #2b6df6; color: #fff; font-size: 15px; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <span class="dot" id="dot"></span>
+  <span id="status">连接中…</span>
+  <span class="spacer"></span>
+  <span id="res"></span>
+  <span class="ver">v2.3</span>
+  <button id="b-wake" title="远程唤醒电脑" hidden>⚡ 唤醒</button>
+  <button id="b-doctor" title="自检">🩺 自检</button>
+  <button id="b-files" title="文件互传">📁 文件</button>
+  <button id="b-set" title="操作设置">⚙</button>
+  <span class="seg" id="qseg">
+    <button data-q="low">流畅</button>
+    <button data-q="mid" class="on">均衡</button>
+    <button data-q="high">高清</button>
+  </span>
+</div>
+
+<div id="stage">
+  <div id="wrap">
+    <img id="screen" alt="远程桌面" draggable="false">
+    <div id="vwrap">
+      <canvas id="vcanvas"></canvas>
+      <canvas id="ccursor"></canvas>
+    </div>
+  </div>
+</div>
+
+<div id="side">
+
+<div id="toolbar">
+  <div class="row">
+    <button id="b-left">左键</button>
+    <button id="b-right">右键</button>
+    <button id="b-mid">中键</button>
+    <button id="b-wup">滚↑</button>
+    <button id="b-wdown">滚↓</button>
+    <button id="b-fs">全屏</button>
+  </div>
+  <div class="row">
+    <button id="b-ctrl" class="mod" data-mod="ctrl">Ctrl</button>
+    <button id="b-alt" class="mod" data-mod="alt">Alt</button>
+    <button id="b-shift" class="mod" data-mod="shift">Shift</button>
+    <button id="b-win" class="mod" data-mod="win">Win</button>
+    <button id="b-kb">⌨ 键盘</button>
+    <button id="b-cad" class="warn">CtrlAltDel</button>
+  </div>
+</div>  <div id="kbpanel">
+  <div id="kbline">
+    <input id="kb-input" placeholder="英文/符号直接打字，中文输入法组词后点发送" enterkeyhint="send">
+    <button id="kb-send">发送</button>
+  </div>
+  <div id="kbkeys"></div>
+  <div id="kbcombo"></div>
+</div>
+
+<div id="filepanel">
+  <div class="fp-head">
+    <button id="fp-up">↑ 上级</button>
+    <span class="fp-path" id="fp-path"></span>
+    <button id="fp-close">✕</button>
+  </div>
+  <div class="fp-list" id="fp-list"></div>
+  <div class="fp-up2">
+    <input type="file" id="fp-input">
+    <button id="fp-send">上传</button>
+  </div>
+  <div id="fp-progress" hidden>
+    <div id="fp-bar"><i></i></div>
+    <span id="fp-pct">0%</span>
+    <span id="fp-name"></span>
+  </div>
+</div>
+</div>
+
+<div id="rot" hidden>↻ 建议横屏使用，控制更顺手</div>
+
+<div id="setpanel" hidden>
+  <div class="box">
+    <h2>操作设置</h2>
+    <div class="set-row"><span>鼠标灵敏度</span>
+      <span class="seg" id="set-sens">
+        <button data-v="0.4">精准</button>
+        <button data-v="1" class="on">标准</button>
+        <button data-v="1.8">灵敏</button>
+      </span></div>
+    <div class="set-row"><span>双指滚轮速度</span>
+      <span class="seg" id="set-wheel">
+        <button data-v="0.5">慢</button>
+        <button data-v="1" class="on">中</button>
+        <button data-v="1.8">快</button>
+      </span></div>
+    <div class="set-row"><span>单手模式（工具栏贴底）</span>
+      <button id="set-onehand" class="toggle">关</button></div>
+    <button id="set-close">完成</button>
+  </div>
+</div>
+
+<div id="auth" hidden>
+  <div class="box">
+    <h2 id="auth-title">需要访问口令</h2>
+    <p id="auth-desc">在电脑上运行 server.py 时，终端会打印带 token 的访问链接，直接打开那个链接即可。</p>
+    <input id="auth-input-id" placeholder="识别码（远程模式）" autocomplete="off" hidden>
+    <input id="auth-input" placeholder="口令 / token" autocomplete="off">
+    <button id="auth-go">连接</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var params = new URLSearchParams(location.search);
+  var token = params.get("token") || "";
+  // 识别码模式（跨网络经中继服务器）：URL 带 id/pass
+  var relay = !!params.get("id");
+  var deviceId = params.get("id") || "";
+  var pass = params.get("pass") || "";
+  var lastOnline = null;
+  var info = { w: 0, h: 0 };
+  var ws = null, wsOk = false, reconnectTimer = null, closedByUs = false;
+  var mods = { ctrl: false, alt: false, shift: false, win: false };
+  var lastFrame = { x: 0, y: 0 }; // 最后一次触摸/点击的帧内坐标
+  var quality = "mid";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var screenEl = $("screen"), stage = $("stage"), dot = $("dot"),
+      statusEl = $("status"), resEl = $("res");
+  var vcanvas = $("vcanvas"), vctx = vcanvas.getContext("2d");
+  var ccanvas = $("ccursor"), cctx = ccanvas.getContext("2d");
+  var vwrap = $("vwrap");
+  var view = screenEl; // 当前可见的渲染元素（img 或 canvas）
+
+  function apiUrl(path, extra) {
+    extra = extra || "";
+    if (relay) return path + "?id=" + encodeURIComponent(deviceId) + "&pass=" + encodeURIComponent(pass) + extra;
+    return path + "?token=" + encodeURIComponent(token) + extra;
+  }
+  function streamUrl(q) {
+    if (relay) return apiUrl("/stream"); // 画质由 setpreset 指令让电脑端切换
+    return apiUrl("/stream", "&q=" + q);
+  }
+  function wsUrl(path) {
+    var proto = location.protocol === "https:" ? "wss://" : "ws://";
+    return proto + location.host + apiUrl(path);
+  }
+  function ctlUrl() {
+    return wsUrl(relay ? "/ctl" : "/ws");
+  }
+  function send(obj) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function activeMods() {
+    return Object.keys(mods).filter(function (k) { return mods[k]; });
+  }
+  function modKey(name) {
+    return name === "win" ? "win" : name; // pyautogui 直接识别 ctrl/alt/shift/win
+  }
+
+  /* ---------- 画质 ---------- */
+  function setQuality(q) {
+    if (q === quality) return;
+    quality = q;
+    document.querySelectorAll("#qseg button").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.q === q);
+    });
+    send({ t: "setpreset", preset: q }); // 控制通道下发，电脑端本地换编码参数
+    if (vmode === "mjpeg") screenEl.src = streamUrl(q);
+    setTimeout(fetchInfo, 700);
+  }
+  document.querySelectorAll("#qseg button").forEach(function (b) {
+    b.addEventListener("click", function () { setQuality(b.dataset.q); });
+  });
+
+  /* ---------- 信息 / 在线状态（返回 true=已通过鉴权） ---------- */
+  function fetchInfo() {
+    return fetch(apiUrl("/info")).then(function (r) {
+      if (r.status === 403) return null;
+      return r.json();
+    }).then(function (d) {
+      if (!d) return false;
+      // 登录后（URL 无参数）从响应识别运行模式与设备识别码
+      if (d.mode === "relay") { relay = true; if (d.device_id) deviceId = d.device_id; }
+      if (relay) {
+        var online = !!d.online;
+        if (d.w) { info.w = d.w; info.h = d.h; }
+        if (d.preset) info.preset = d.preset;
+        if (online && online !== lastOnline) {
+          // 设备刚上线：重新建立推流
+          if (vmode === "none") startVideo();
+          else if (vmode === "mjpeg") screenEl.src = apiUrl("/stream", "&ts=" + Date.now());
+        }
+        lastOnline = online;
+        dot.className = "dot " + (online ? "ok" : "bad");
+        statusEl.textContent = "识别码 " + deviceId + " · " + (online ? "在线" : "设备离线");
+        // 设备离线时显示「⚡ 唤醒」按钮（需中继配置了 --wol 才能生效）
+        $("b-wake").hidden = online;
+        if (info.w) {
+          resEl.textContent = info.w + "×" + info.h + " · " + (info.preset || "");
+          lastFrame.x = info.w / 2; lastFrame.y = info.h / 2;
+        }
+        // 画质按钮与设备当前设置同步
+        if (d.preset) {
+          quality = d.preset;
+          document.querySelectorAll("#qseg button").forEach(function (b) {
+            b.classList.toggle("on", b.dataset.q === d.preset);
+          });
+        }
+        return true;
+      }
+      info = d;
+      resEl.textContent = d.w + "×" + d.h + " · " + d.preset;
+      lastFrame.x = d.w / 2; lastFrame.y = d.h / 2;
+      return true;
+    }).catch(function () { return false; });
+  }
+
+  /* ---------- WebSocket ---------- */
+  function connect() {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    ws = new WebSocket(ctlUrl());
+    ws.onopen = function () {
+      wsOk = true; dot.className = "dot ok";
+      if (!relay) statusEl.textContent = "已连接";
+    };
+    ws.onclose = function () {
+      wsOk = false; dot.className = "dot bad";
+      statusEl.textContent = "已断开，重连中…";
+      if (!closedByUs) reconnectTimer = setTimeout(connect, 1500);
+    };
+    ws.onerror = function () { try { ws.close(); } catch (e) {} };
+  }
+
+  /* ---------- 坐标换算 ---------- */
+  function clientToFrame(cx, cy) {
+    var r = view.getBoundingClientRect();
+    if (!r.width || !r.height) return { x: 0, y: 0 };
+    return {
+      x: (cx - r.left) / r.width * info.w,
+      y: (cy - r.top) / r.height * info.h
+    };
+  }
+
+  /* ---------- 触摸手势：单击=左键 双击=双击 长按=右键 拖动=移动 双指=滚轮 ---------- */
+  var pointers = new Map();
+  var pressTimer = null, moved = false, multi = false, lastCentroid = null;
+  var sens = 1, wheelSpeed = 1, lastSent = null, lastTap = null;
+
+  function centroid() {
+    var xs = 0, ys = 0, n = 0;
+    pointers.forEach(function (p) { xs += p.x; ys += p.y; n++; });
+    return { x: xs / n, y: ys / n };
+  }
+
+  stage.addEventListener("pointerdown", function (e) {
+    if (!wsOk || e.button > 0) return;
+    e.preventDefault();
+    stage.setPointerCapture(e.pointerId);
+    if (pointers.size === 0) { moved = false; multi = false; lastSent = null; }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: Date.now() });
+    if (pointers.size === 2) {
+      multi = true;
+      clearTimeout(pressTimer);
+      lastCentroid = centroid();
+    } else if (pointers.size === 1 && !multi) {
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(function () {
+        var p = pointers.get(e.pointerId);
+        if (p && !moved && pointers.size === 1) {
+          var f = clientToFrame(p.x, p.y);
+          lastFrame = f;
+          send({ t: "click", button: "right", x: f.x, y: f.y, mods: activeMods() });
+          pointers.delete(e.pointerId);
+        }
+      }, 500);
+    }
+  });
+
+  stage.addEventListener("pointermove", function (e) {
+    if (!pointers.has(e.pointerId)) return;
+    var p = pointers.get(e.pointerId);
+    var dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (pointers.size === 1 && !multi) {
+      if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+      if (moved) {
+        var target = clientToFrame(e.clientX, e.clientY);
+        var out = { x: target.x, y: target.y };
+        // 灵敏度：精准(0.4)光标跟手变慢便于精控，灵敏(1.8)跑得更快
+        if (sens !== 1 && lastSent) {
+          out.x = lastSent.x + (target.x - lastSent.x) * sens;
+          out.y = lastSent.y + (target.y - lastSent.y) * sens;
+        }
+        lastFrame = out; lastSent = out;
+        send({ t: "move", x: out.x, y: out.y });
+      }
+    } else if (pointers.size === 2) {
+      var c = centroid();
+      var dy = Math.round((lastCentroid.y - c.y) * 0.7 * wheelSpeed);
+      var dx = Math.round((lastCentroid.x - c.x) * 0.5 * wheelSpeed);
+      if (dy !== 0 || dx !== 0) send({ t: "scroll", dy: dy, dx: dx, mods: activeMods() });
+      lastCentroid = c;
+    }
+  });
+
+  function endPointer(e) {
+    if (!pointers.has(e.pointerId)) return;
+    var p = pointers.get(e.pointerId);
+    clearTimeout(pressTimer);
+    var wasOne = pointers.size === 1;
+    pointers.delete(e.pointerId);
+    if (wasOne && !multi) {
+      if (!moved) {
+        var f = clientToFrame(p.x, p.y);
+        lastFrame = f;
+        var now = Date.now();
+        if (lastTap && now - lastTap.t < 300 &&
+            Math.abs(p.x - lastTap.x) < 34 && Math.abs(p.y - lastTap.y) < 34) {
+          // 快速双击 = 双击（打开文件/程序）
+          send({ t: "click", button: "left", x: f.x, y: f.y, count: 2, mods: activeMods() });
+          lastTap = null;
+        } else {
+          send({ t: "click", button: "left", x: f.x, y: f.y, mods: activeMods() });
+          lastTap = { t: now, x: p.x, y: p.y };
+        }
+      }
+    }
+    if (pointers.size === 0) lastCentroid = null;
+  }
+  stage.addEventListener("pointerup", endPointer);
+  stage.addEventListener("pointercancel", endPointer);
+  stage.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  /* ---------- 工具栏 ---------- */
+  function clickAtFrame(button) {
+    send({ t: "click", button: button, x: lastFrame.x, y: lastFrame.y, mods: activeMods() });
+  }
+  $("b-left").addEventListener("click", function () { clickAtFrame("left"); });
+  $("b-right").addEventListener("click", function () { clickAtFrame("right"); });
+  $("b-mid").addEventListener("click", function () { clickAtFrame("middle"); });
+  $("b-wup").addEventListener("click", function () { send({ t: "scroll", dy: 3, dx: 0, mods: activeMods() }); });
+  $("b-wdown").addEventListener("click", function () { send({ t: "scroll", dy: -3, dx: 0, mods: activeMods() }); });
+
+  document.querySelectorAll(".mod").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var k = b.dataset.mod;
+      mods[k] = !mods[k];
+      b.classList.toggle("on", mods[k]);
+      if (mods[k]) send({ t: "keydown", key: modKey(k) });
+      else send({ t: "keyup", key: modKey(k) });
+    });
+  });
+
+  $("b-doctor").addEventListener("click", function () {
+    window.open("/doctor" + location.search, "_blank");
+  });
+
+  /* ---------- 远程唤醒（WoL）：中继需 --wol "识别码:MAC" 配置 ---------- */
+  $("b-wake").addEventListener("click", function () {
+    var btn = $("b-wake");
+    btn.disabled = true;
+    statusEl.textContent = "正在发送唤醒包…";
+    fetch(apiUrl("/wake"), { method: "POST", credentials: "same-origin" })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: "HTTP " + r.status }; }); })
+      .then(function (d) {
+        if (d.ok) {
+          statusEl.textContent = "⚡ 已发送唤醒包，等待电脑开机（约 30~60 秒）…";
+          setTimeout(function () { statusEl.textContent = "识别码 " + deviceId + " · 设备离线"; }, 6000);
+        } else {
+          statusEl.textContent = "唤醒失败：" + (d.error || "未配置 WoL");
+          setTimeout(function () { statusEl.textContent = "识别码 " + deviceId + " · 设备离线"; }, 6000);
+        }
+      })
+      .catch(function () { statusEl.textContent = "唤醒失败：网络错误"; })
+      .then(function () { btn.disabled = false; });
+  });
+
+  /* ---------- 文件互传 ---------- */
+  var filePanel = $("filepanel");
+  var fpPath = "";
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function fmtSize(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+  function parentOf(p) {
+    p = String(p).replace(/\\/g, "/");
+    var i = p.lastIndexOf("/");
+    if (i <= 0) return "";
+    return p.slice(0, i);
+  }
+  function toggleFiles(show) {
+    filePanel.classList.toggle("show", show);
+    if (show) loadFiles();
+  }
+  function fpSetProgress(pct, name) {
+    $("fp-progress").hidden = false;
+    $("fp-bar").firstChild.style.width = pct + "%";
+    $("fp-pct").textContent = pct + "%";
+    $("fp-name").textContent = name || "";
+  }
+  function loadFiles() {
+    fetch(apiUrl("/files", "&path=" + encodeURIComponent(fpPath || "")))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        var list = $("fp-list");
+        list.innerHTML = "";
+        if (!d.ok) { list.appendChild(el("div", "fp-err", d.error || "加载失败")); return; }
+        fpPath = d.path;
+        $("fp-path").textContent = d.path;
+        $("fp-up").disabled = !d.parent;
+        d.entries.forEach(function (e) {
+          var row = document.createElement("div");
+          row.className = "fp-row";
+          row.innerHTML = "<span>" + (e.is_dir ? "📁" : "📄") + " " + escapeHtml(e.name) + "</span>"
+            + (e.is_dir ? "" : '<span class="fp-size">' + fmtSize(e.size) + "</span>");
+          row.addEventListener("click", function () {
+            if (e.is_dir) { fpPath = d.path + "/" + e.name; loadFiles(); }
+            else downloadFile(d.path, e.name);
+          });
+          list.appendChild(row);
+        });
+        if (!d.entries.length) list.appendChild(el("div", "fp-msg", "（空目录）"));
+      })
+      .catch(function () {
+        var list = $("fp-list"); list.innerHTML = "";
+        list.appendChild(el("div", "fp-err", "无法连接，请确认设备在线"));
+      });
+  }
+  function downloadFile(dir, name) {
+    var url = apiUrl("/download", "&path=" + encodeURIComponent(dir + "/" + name));
+    // 支持 File System Access API（Android Chrome 等）：流式写入磁盘，大文件不占内存
+    if (window.showSaveFilePicker) {
+      (async function () {
+        try {
+          var handle = await window.showSaveFilePicker({ suggestedName: name });
+          var writable = await handle.createWritable();
+          var resp = await fetch(url, { credentials: "same-origin" });
+          if (!resp.ok || !resp.body) throw new Error("HTTP " + resp.status);
+          var total = parseInt(resp.headers.get("Content-Length") || "0", 10) || 0;
+          var reader = resp.body.getReader();
+          var received = 0;
+          fpSetProgress(0, name);
+          while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            await writable.write(chunk.value);
+            received += chunk.value.length;
+            if (total) fpSetProgress(Math.round(received / total * 100), name);
+          }
+          await writable.close();
+          $("fp-progress").hidden = true;
+          $("fp-name").textContent = "已保存";
+        } catch (e) {
+          if (e && e.name === "AbortError") { $("fp-progress").hidden = true; return; }
+          $("fp-name").textContent = "下载失败：" + (e.message || "");
+          $("fp-progress").hidden = true;
+        }
+      })();
+      return;
+    }
+    // 兜底：Blob 方式（iOS Safari 等）
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", url);
+    xhr.responseType = "blob";
+    fpSetProgress(0, name);
+    xhr.onprogress = function (e) {
+      if (e.lengthComputable) fpSetProgress(Math.round(e.loaded / e.total * 100), name);
+    };
+    xhr.onload = function () {
+      if (xhr.status === 200) {
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(xhr.response);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+        $("fp-progress").hidden = true;
+      } else {
+        fpSetProgress(0, "");
+        $("fp-name").textContent = "下载失败 (" + xhr.status + ")";
+      }
+    };
+    xhr.onerror = function () { $("fp-name").textContent = "下载失败"; };
+    xhr.send();
+  }
+  function uploadFiles() {
+    var input = $("fp-input");
+    var f = input.files && input.files[0];
+    if (!f) return;
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", apiUrl("/upload", "&path=" + encodeURIComponent(fpPath || "") + "&name=" + encodeURIComponent(f.name)));
+    fpSetProgress(0, f.name);
+    xhr.upload.onprogress = function (e) {
+      if (e.lengthComputable) fpSetProgress(Math.round(e.loaded / e.total * 100), f.name);
+    };
+    xhr.onload = function () {
+      if (xhr.status === 200) {
+        $("fp-progress").hidden = true;
+        input.value = "";
+        loadFiles();
+      } else {
+        fpSetProgress(0, "");
+        $("fp-name").textContent = "上传失败 (" + xhr.status + ")";
+      }
+    };
+    xhr.onerror = function () { $("fp-name").textContent = "上传失败"; };
+    xhr.send(f);
+  }
+  $("b-files").addEventListener("click", function () {
+    toggleFiles(!filePanel.classList.contains("show"));
+  });
+  $("fp-close").addEventListener("click", function () { toggleFiles(false); });
+  $("fp-up").addEventListener("click", function () {
+    fpPath = parentOf($("fp-path").textContent);
+    loadFiles();
+  });
+  $("fp-send").addEventListener("click", uploadFiles);
+  $("b-fs").addEventListener("click", function () {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(function () {});
+  });
+  $("b-cad").addEventListener("click", function () {
+    send({ t: "combo", keys: ["ctrl", "alt", "del"] });
+    send({ t: "combo", keys: ["ctrl", "shift", "esc"] }); // 兜底打开任务管理器
+  });
+
+  /* ---------- 操作设置（灵敏度/滚轮/单手模式） ---------- */
+  function loadPrefs() {
+    try {
+      var s = JSON.parse(localStorage.getItem("fr-prefs") || "{}");
+      if (typeof s.sens === "number") sens = s.sens;
+      if (typeof s.wheel === "number") wheelSpeed = s.wheel;
+      if (s.onehand) document.body.classList.add("onehand");
+    } catch (e) {}
+    syncPrefsUI();
+  }
+  function syncPrefsUI() {
+    document.querySelectorAll("#set-sens button").forEach(function (b) {
+      b.classList.toggle("on", parseFloat(b.dataset.v) === sens);
+    });
+    document.querySelectorAll("#set-wheel button").forEach(function (b) {
+      b.classList.toggle("on", parseFloat(b.dataset.v) === wheelSpeed);
+    });
+    var oh = document.body.classList.contains("onehand");
+    $("set-onehand").classList.toggle("on", oh);
+    $("set-onehand").textContent = oh ? "开" : "关";
+  }
+  function savePrefs() {
+    try {
+      localStorage.setItem("fr-prefs", JSON.stringify({
+        sens: sens, wheel: wheelSpeed,
+        onehand: document.body.classList.contains("onehand")
+      }));
+    } catch (e) {}
+  }
+  $("b-set").addEventListener("click", function () {
+    $("setpanel").hidden = !$("setpanel").hidden;
+  });
+  $("set-close").addEventListener("click", function () { $("setpanel").hidden = true; });
+  document.querySelectorAll("#set-sens button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      sens = parseFloat(b.dataset.v); syncPrefsUI(); savePrefs();
+    });
+  });
+  document.querySelectorAll("#set-wheel button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      wheelSpeed = parseFloat(b.dataset.v); syncPrefsUI(); savePrefs();
+    });
+  });
+  $("set-onehand").addEventListener("click", function () {
+    document.body.classList.toggle("onehand");
+    syncPrefsUI(); savePrefs();
+  });
+  loadPrefs();
+
+  /* ---------- 虚拟键盘 ---------- */
+  var specialKeys = [
+    ["Esc", "esc"], ["Enter", "enter"], ["Tab", "tab"],
+    ["⌫", "backspace"], ["Del", "delete"], ["空格", "space"],
+    ["↑", "up"], ["↓", "down"], ["←", "left"], ["→", "right"],
+    ["Home", "home"], ["End", "end"], ["PgUp", "pageup"], ["PgDn", "pagedown"]
+  ];
+  var kbGrid = $("kbkeys");
+  specialKeys.forEach(function (pair) {
+    var b = document.createElement("button");
+    b.textContent = pair[0];
+    b.addEventListener("click", function () { send({ t: "press", key: pair[1], mods: activeMods() }); });
+    kbGrid.appendChild(b);
+  });
+
+  // 常用快捷键组合（第二排）
+  var comboKeys = [
+    ["Ctrl+C", ["ctrl", "c"]], ["Ctrl+V", ["ctrl", "v"]], ["Ctrl+X", ["ctrl", "x"]],
+    ["Ctrl+Z", ["ctrl", "z"]], ["Ctrl+A", ["ctrl", "a"]], ["Ctrl+S", ["ctrl", "s"]],
+    ["F5", ["f5"]], ["Win+D", ["win", "d"]], ["Win+L", ["win", "l"]],
+    ["任务管理器", ["ctrl", "shift", "esc"]]
+  ];
+  var kbCombo = $("kbcombo");
+  comboKeys.forEach(function (pair) {
+    var b = document.createElement("button");
+    b.textContent = pair[0];
+    b.addEventListener("click", function () {
+      if (pair[1].length === 1) send({ t: "press", key: pair[1][0], mods: activeMods() });
+      else send({ t: "combo", keys: pair[1] });
+    });
+    kbCombo.appendChild(b);
+  });
+
+  function toggleKb(show) {
+    $("kbpanel").classList.toggle("show", show);
+    if (show) $("kb-input").focus();
+  }
+  $("b-kb").addEventListener("click", function () {
+    toggleKb(!$("kbpanel").classList.contains("show"));
+  });
+  $("kb-send").addEventListener("click", sendText);
+  $("kb-input").addEventListener("keydown", function (e) {
+    if (e.isComposing || e.keyCode === 229) return;  // 中文输入法组词中的回车不发送
+    if (e.key === "Enter") { sendText(); e.preventDefault(); }
+    e.stopPropagation();
+  });
+  function sendText() {
+    var v = $("kb-input").value;
+    if (!v) return;
+    send({ t: "text", text: v, mods: activeMods() });
+    $("kb-input").value = "";
+    $("kb-input").focus(); // 连打：发送后保持焦点，可继续输入
+  }
+
+  /* ---------- 登录（口令不再留在 URL，HttpOnly Cookie 会话） ---------- */
+  var authBox = $("auth");
+  function cleanUrl() {
+    // 登录成功后把口令/识别码口令从地址栏抹掉，防止转发链接泄漏
+    var q = relay && deviceId ? "?id=" + encodeURIComponent(deviceId) : "";
+    history.replaceState({}, "", location.pathname + q);
+  }
+  function showAuth() {
+    if (relay) {
+      $("auth-title").textContent = "需要识别码与口令";
+      $("auth-desc").textContent = "在电脑上运行 server.py（识别码模式）时，终端会打印识别码和口令。登录后口令不会出现在网址里。";
+      $("auth-input-id").hidden = false;
+      $("auth-input").placeholder = "口令";
+      if (deviceId) $("auth-input-id").value = deviceId;
+    } else {
+      $("auth-title").textContent = "需要访问口令";
+      $("auth-desc").textContent = "在电脑上运行 server.py 时，终端会打印带 token 的访问链接。登录后口令不会出现在网址里。";
+      $("auth-input-id").hidden = true;
+      $("auth-input").placeholder = "口令 / token";
+    }
+    authBox.hidden = false;
+  }
+  function doLogin() {
+    var body = new URLSearchParams();
+    if (relay) {
+      var id = $("auth-input-id").value.trim() || deviceId;
+      if (!id) { $("auth-input-id").focus(); return; }
+      deviceId = id;
+      body.set("id", id);
+      body.set("pass", $("auth-input").value.trim());
+    } else {
+      body.set("token", $("auth-input").value.trim());
+    }
+    $("auth-desc").textContent = "正在验证…";
+    fetch("/login", { method: "POST", body: body, credentials: "same-origin" })
+      .then(function (r) {
+        if (r.status === 403) $("auth-desc").textContent = "口令/识别码错误，请重试";
+        else if (r.status === 429) $("auth-desc").textContent = "尝试过于频繁，请 5 分钟后再试";
+        else { cleanUrl(); location.reload(); }
+      })
+      .catch(function () { $("auth-desc").textContent = "网络错误，请重试"; });
+  }
+  $("auth-go").addEventListener("click", doLogin);
+  $("auth-input").addEventListener("keydown", function (e) { if (e.key === "Enter") doLogin(); });
+
+  /* ---------- 分块增量渲染（canvas） ---------- */
+  var vmode = "none"; // none | blocks | mjpeg
+  var vws = null;
+  var vframe = { w: 0, h: 0, cols: 0, rows: 0, block: 64 };
+
+  function showView(which) {
+    if (which === "canvas") {
+      vwrap.classList.add("show");
+      screenEl.style.display = "none";
+      view = vcanvas;
+    } else {
+      vwrap.classList.remove("show");
+      screenEl.style.display = "";
+      view = screenEl;
+    }
+  }
+  function fitCanvas() {
+    if (!vframe.w || !vframe.h) return;
+    var availW = stage.clientWidth || window.innerWidth;
+    var availH = stage.clientHeight || 300;
+    var s = Math.min(availW / vframe.w, availH / vframe.h, 1);
+    vcanvas.style.width = Math.round(vframe.w * s) + "px";
+    vcanvas.style.height = Math.round(vframe.h * s) + "px";
+    ccanvas.style.width = vcanvas.style.width;
+    ccanvas.style.height = vcanvas.style.height;
+  }
+  window.addEventListener("resize", function () { if (vmode === "blocks") fitCanvas(); });
+
+  function ensureCanvas(w, h) {
+    if (vcanvas.width !== w || vcanvas.height !== h) {
+      vcanvas.width = w; vcanvas.height = h;
+      ccanvas.width = w; ccanvas.height = h;
+      vctx.fillStyle = "#0d0f14";
+      vctx.fillRect(0, 0, w, h);
+      fitCanvas();
+    }
+    if (vmode !== "blocks") {
+      vmode = "blocks";
+      showView("canvas");
+    }
+  }
+  function drawJpeg(jpeg, x, y) {
+    var blob = new Blob([jpeg], { type: "image/jpeg" });
+    if (window.createImageBitmap) {
+      createImageBitmap(blob).then(function (bmp) {
+        vctx.drawImage(bmp, x, y);
+      }).catch(function () { imgFallback(blob, x, y); });
+    } else imgFallback(blob, x, y);
+  }
+  function imgFallback(blob, x, y) {
+    var url = URL.createObjectURL(blob);
+    var im = new Image();
+    im.onload = function () { vctx.drawImage(im, x, y); URL.revokeObjectURL(url); };
+    im.onerror = function () { URL.revokeObjectURL(url); };
+    im.src = url;
+  }
+  function drawCursor(cx, cy) {
+    cctx.clearRect(0, 0, ccanvas.width, ccanvas.height);
+    cctx.beginPath();
+    cctx.moveTo(cx, cy);
+    cctx.lineTo(cx + 14, cy + 10);
+    cctx.lineTo(cx + 8, cy + 14);
+    cctx.lineTo(cx + 5, cy + 19);
+    cctx.lineTo(cx + 2, cy + 13);
+    cctx.closePath();
+    cctx.fillStyle = "#fff";
+    cctx.fill();
+    cctx.strokeStyle = "#111";
+    cctx.lineWidth = 1.5;
+    cctx.stroke();
+  }
+
+  var VBLOCK = 64; // 与电脑端 BlockEncoder.BLOCK 一致
+  function vText(d) {
+    if (d.t === "init") {
+      vframe.w = d.w; vframe.h = d.h;
+      vframe.cols = d.cols; vframe.rows = d.rows; vframe.block = d.block;
+    }
+  }
+  function vBinary(data) {
+    var t = data[0];
+    if (t === 1) { // 全帧（长度 4 字节，JPEG 可能超 64KB）
+      var w = (data[1] << 8) | data[2];
+      var h = (data[3] << 8) | data[4];
+      var len = (data[5] << 24) | (data[6] << 16) | (data[7] << 8) | data[8];
+      vframe.w = w; vframe.h = h;
+      vframe.block = VBLOCK;
+      vframe.cols = Math.ceil(w / VBLOCK); // 中继模式无 init 文本，自行推导网格
+      vframe.rows = Math.ceil(h / VBLOCK);
+      ensureCanvas(w, h);
+      drawJpeg(data.subarray(9, 9 + len), 0, 0);
+      drawCursor((data[9 + len] << 8) | data[10 + len], (data[11 + len] << 8) | data[12 + len]);
+    } else if (t === 2) { // 变化块
+      var n = (data[1] << 8) | data[2];
+      var p = 3;
+      for (var i = 0; i < n; i++) {
+        var idx = (data[p] << 8) | data[p + 1];
+        var l = (data[p + 2] << 8) | data[p + 3];
+        if (vframe.cols) {
+          var col = idx % vframe.cols, row = Math.floor(idx / vframe.cols);
+          drawJpeg(data.subarray(p + 4, p + 4 + l), col * vframe.block, row * vframe.block);
+        }
+        p += 4 + l;
+      }
+      if (p + 4 <= data.length) {
+        drawCursor((data[p] << 8) | data[p + 1], (data[p + 2] << 8) | data[p + 3]);
+      }
+    } else if (t === 4) { // 光标
+      drawCursor((data[1] << 8) | data[2], (data[3] << 8) | data[4]);
+    }
+  }
+
+  function openVStream() {
+    if (!window.WebSocket) { startMjpeg(); return; }
+    try { vws = new WebSocket(wsUrl("/vstream")); }
+    catch (e) { startMjpeg(); return; }
+    vws.binaryType = "arraybuffer";
+    vws.onmessage = function (e) {
+      if (typeof e.data === "string") {
+        try { vText(JSON.parse(e.data)); } catch (err) {}
+      } else {
+        vBinary(new Uint8Array(e.data));
+      }
+    };
+    vws.onclose = function () {
+      var wasBlocks = vmode === "blocks";
+      vws = null;
+      if (wasBlocks) setTimeout(openVStream, 1500); // 断线静默重连，保留已渲染画面
+      else if (vmode === "none") startMjpeg();
+    };
+    vws.onerror = function () { try { vws.close(); } catch (e) {} };
+  }
+  function startVideo() {
+    if (vmode === "blocks") return;
+    if (relay && lastOnline === false) return; // 设备离线，等上线再连
+    vmode = "none";
+    openVStream();
+    setTimeout(function () {
+      // 3 秒没收到任何帧 → 降级为 MJPEG
+      if (vmode === "none") {
+        try { vws.close(); } catch (e) {}
+        startMjpeg();
+      }
+    }, 3000);
+  }
+  function startMjpeg() {
+    vmode = "mjpeg";
+    showView("img");
+    screenEl.src = streamUrl(quality);
+  }
+  screenEl.addEventListener("error", function () {
+    if (relay && vmode === "mjpeg") setTimeout(function () {
+      screenEl.src = apiUrl("/stream", "&ts=" + Date.now());
+    }, 2000);
+  });
+
+  /* ---------- 横屏提示（手机上竖屏时提醒，点一下或 6 秒后消失） ---------- */
+  (function () {
+    var r = $("rot");
+    if (!r || !window.matchMedia) return;
+    if (localStorage && localStorage.getItem("fr_rot_off")) return;
+    var touch = ('ontouchstart' in window) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+    function decide() { if (touch) r.hidden = !(window.innerHeight > window.innerWidth); }
+    decide();
+    r.addEventListener("click", function () {
+      r.hidden = true;
+      if (localStorage) localStorage.setItem("fr_rot_off", "1");
+    });
+    setTimeout(function () { r.hidden = true; }, 6000);
+    window.addEventListener("resize", decide);
+  })();
+
+  /* ---------- 屏幕常亮（Wake Lock）：监看时手机屏幕不自动熄灭 ---------- */
+  var wakeLock = null;
+  function requestWakeLock() {
+    if (navigator.wakeLock && !wakeLock) {
+      navigator.wakeLock.request("screen")
+        .then(function (wl) { wakeLock = wl; })
+        .catch(function () { /* 不支持时静默 */ });
+    }
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) requestWakeLock();
+  });
+
+  /* ---------- 启动：先探测运行模式 → 鉴权 → 连接 ---------- */
+  function boot() {
+    fetchInfo().then(function (ok) {
+      if (ok === false) { showAuth(); return; }
+      cleanUrl();
+      if (relay) setInterval(fetchInfo, 3000);
+      connect();
+      startVideo();
+      requestWakeLock();
+    });
+  }
+  fetch("/mode").then(function (r) { return r.json(); })
+    .then(function (m) { if (m.mode === "relay") relay = true; })
+    .catch(function () {})
+    .then(boot);
+})();
+</script>
+</body>
+</html>

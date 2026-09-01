@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>FreeRemote 自检</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d0f14; color: #e6e9ef; font-family: -apple-system, "Segoe UI",
+         "PingFang SC", "Microsoft YaHei", sans-serif; padding: 14px; max-width: 560px; margin: 0 auto; }
+  .head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .head h1 { font-size: 18px; flex: 1; }
+  .head span#mode { font-size: 12px; color: #9aa4b8; }
+  .head button { padding: 7px 14px; border: 0; border-radius: 8px; background: #2b6df6; color: #fff; font-size: 13px; }
+
+  #summary { display: flex; align-items: center; gap: 10px; background: #14171f;
+    border: 1px solid #232936; border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+  #verdict { font-size: 30px; }
+  #summary .meta { font-size: 12px; color: #9aa4b8; line-height: 1.6; }
+  #summary .meta b { color: #e6e9ef; }
+
+  .card { background: #14171f; border: 1px solid #232936; border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 12px; }
+  .card h2 { font-size: 14px; color: #9aa4b8; margin-bottom: 8px; }
+
+  .check { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0;
+    border-bottom: 1px solid #1a1f2b; }
+  .check:last-child { border-bottom: 0; }
+  .check .ic { font-size: 16px; width: 20px; text-align: center; flex: none; margin-top: 1px; }
+  .check .body { flex: 1; min-width: 0; }
+  .check .name { font-size: 14px; }
+  .check .detail { font-size: 12px; color: #9aa4b8; margin-top: 2px; word-break: break-all; }
+  .check .remedy { font-size: 12px; color: #f0b429; background: rgba(240,180,41,.08);
+    border-left: 3px solid #f0b429; padding: 6px 8px; margin-top: 5px; border-radius: 0 6px 6px 0; }
+
+  .warn { font-size: 12px; color: #f0b429; padding: 4px 0; }
+  .ok { color: #2ecc71; }
+  .bad { color: #e74c3c; }
+
+  .remedy-item { font-size: 12px; color: #9aa4b8; padding: 3px 0;
+    display: flex; gap: 8px; }
+  .remedy-item .at { color: #2b6df6; flex: none; }
+  #empty { font-size: 12px; color: #555d6e; }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <h1>🩺 FreeRemote 自检</h1>
+  <span id="mode"></span>
+  <button id="refresh">刷新</button>
+</div>
+
+<div id="summary">
+  <div id="verdict">…</div>
+  <div class="meta" id="meta"></div>
+</div>
+
+<div class="card" id="checksCard">
+  <h2>健康检查</h2>
+  <div id="checks"></div>
+</div>
+
+<div class="card">
+  <h2>警告与建议</h2>
+  <div id="warnings"><div id="empty">暂无</div></div>
+</div>
+
+<div class="card">
+  <h2>自动补救记录</h2>
+  <div id="remedies"><div id="empty2">暂无（一切正常）</div></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var params = new URLSearchParams(location.search);
+  var relay = !!params.get("id");
+  var token = params.get("token") || "";
+  var deviceId = params.get("id") || "";
+  var pass = params.get("pass") || "";
+
+  function apiUrl(path) {
+    var extra = "";
+    if (relay) return path + "?id=" + encodeURIComponent(deviceId) + "&pass=" + encodeURIComponent(pass);
+    return path + "?token=" + encodeURIComponent(token) + extra;
+  }
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+
+  function fmtUptime(s) {
+    if (s < 60) return s + " 秒";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + " 分 " + (s % 60) + " 秒";
+    return Math.floor(m / 60) + " 小时 " + (m % 60) + " 分";
+  }
+
+  function load() {
+    fetch(apiUrl("/status")).then(function (r) {
+      if (r.status === 403) throw new Error("403：口令/识别码错误");
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(render).catch(function (e) {
+      var v = document.getElementById("verdict");
+      var m = document.getElementById("meta");
+      if (/403/.test(e.message)) {
+        v.textContent = "🔒";
+        v.className = "bad";
+        m.innerHTML = "未登录或会话已失效。<a href=\"/\" style=\"color:#2b6df6\">返回主页登录</a>后再打开本页。";
+      } else {
+        v.textContent = "❓";
+        m.textContent = "无法获取自检数据：" + e.message;
+      }
+    });
+  }
+
+  function render(d) {
+    document.getElementById("mode").textContent = d.mode === "relay" ? "识别码模式" : "局域网模式";
+    var v = document.getElementById("verdict");
+    var online = d.ok !== false; // relay: d.ok 表示设备在线；lan: 全部检查通过
+    if (d.mode === "relay") {
+      v.textContent = online ? "✅" : "⏳";
+      v.className = online ? "ok" : "";
+    } else {
+      v.textContent = d.ok ? "✅" : "⚠️";
+      v.className = d.ok ? "ok" : "bad";
+    }
+
+    var meta = document.getElementById("meta");
+    var lines = [];
+    lines.push("运行时长 <b>" + fmtUptime(d.uptime || 0) + "</b>");
+    if (d.fps_target) lines.push("帧率 <b>" + d.fps_actual + " / " + d.fps_target + " fps</b>");
+    if (d.preset) lines.push("画质 <b>" + d.preset + "</b>");
+    if (d.frame) lines.push("分辨率 <b>" + d.frame[0] + "×" + d.frame[1] + "</b>");
+    if (d.reconnects) lines.push("重连 <b>" + d.reconnects + "</b> 次");
+    meta.innerHTML = lines.join("　·　");
+
+    // 中继模式：设备离线时只显示基础信息
+    if (d.mode === "relay" && !d.online) {
+      document.getElementById("checks").innerHTML =
+        '<div class="check"><div class="ic">⏳</div><div class="body">' +
+        '<div class="name">设备离线</div>' +
+        '<div class="detail">电脑端尚未连接中继，无法获取其自检数据。请确认电脑上 server.py（识别码模式）正在运行。</div></div></div>';
+      document.getElementById("warnings").innerHTML = '<div class="warn">设备离线，等待电脑上线后自动显示完整自检。</div>';
+      document.getElementById("remedies").innerHTML = "";
+      return;
+    }
+
+    var tel = d.telemetry; // 中继模式下包含电脑端上报的完整自检
+    var checks = (tel && tel.checks) || d.checks || [];
+    var box = document.getElementById("checks");
+    box.innerHTML = "";
+    if (!checks.length) {
+      box.appendChild(el("div", "warn", "暂无检查项（服务刚启动，稍后自动出现）"));
+    }
+    checks.forEach(function (c) {
+      var row = document.createElement("div");
+      row.className = "check";
+      var ic = el("div", "ic", c.ok ? "✅" : "❌");
+      var body = el("div", "body");
+      body.appendChild(el("div", "name", c.name));
+      if (c.detail) body.appendChild(el("div", "detail", c.detail));
+      if (!c.ok && c.remedy) body.appendChild(el("div", "remedy", "补救：" + c.remedy));
+      row.appendChild(ic);
+      row.appendChild(body);
+      box.appendChild(row);
+    });
+
+    var warns = (tel && tel.warnings) || d.warnings || [];
+    var wbox = document.getElementById("warnings");
+    wbox.innerHTML = "";
+    if (!warns.length) wbox.appendChild(el("div", "", "暂无警告"));
+    warns.forEach(function (w) { wbox.appendChild(el("div", "warn", "⚠ " + w)); });
+
+    var rems = (tel && tel.remedies) || d.remedies || [];
+    var rbox = document.getElementById("remedies");
+    rbox.innerHTML = "";
+    if (!rems.length) rbox.appendChild(el("div", "", "暂无自动补救（一切正常）"));
+    rems.forEach(function (r) {
+      var row = el("div", "remedy-item");
+      row.appendChild(el("span", "at", r.at));
+      row.appendChild(el("span", "", r.action));
+      rbox.appendChild(row);
+    });
+  }
+
+  document.getElementById("refresh").addEventListener("click", load);
+  load();
+  setInterval(load, 3000);
+})();
+</script>
+</body>
+</html>

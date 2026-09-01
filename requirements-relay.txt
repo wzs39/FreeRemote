@@ -1,0 +1,5 @@
+# relay.py 中继服务器在 Linux/无桌面环境所需的精简依赖。
+# 注意：不要用根目录的 requirements.txt —— 里面含 pyautogui/mss 等电脑端依赖，
+# 在无显示器的部署机上安装会失败或无意义。
+aiohttp>=3.9
+Pillow>=10.0

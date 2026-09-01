@@ -1,0 +1,20 @@
+# 本地生成物 / 密钥，勿提交
+.venv/
+__pycache__/
+*.pyc
+*.log
+*.pem
+*.key
+.env
+token.txt
+cookie.txt
+relay-config.txt
+server.out
+auto.log
+*.tar
+autostart-*.bat
+freeremote-relay.tar
+lucky/
+
+# 会话/预览内部目录（含口令备份与临时输出，勿提交）
+.freebuff/

@@ -1,0 +1,46 @@
+# FreeRemote 中继服务器 —— 公网 HTTPS 生产版（Caddy 自动证书）
+#
+# 前置：一个解析到本服务器的域名（如 relay.example.com），且在 .env 中配置：
+#   DOMAIN=relay.example.com
+#   RELAY_DEVICES=TEST01:你的强口令
+#   RELAY_STRICT=1
+#
+# 用法：
+#   1. 安装 Docker + compose 插件（Ubuntu: apt install docker-compose-plugin）
+#   2. 复制 .env.example 为 .env 并填写
+#   3. docker compose -f docker-compose.https.yml up -d --build
+#   4. 手机访问 https://relay.example.com/  → 自动 wss，输入识别码+口令登录
+#   5. 电脑端：python server.py --relay wss://relay.example.com --id TEST01 --password 口令
+#
+# 架构：Caddy 终结 TLS（80/443 对公网），中继只暴露在 compose 内网（8080 不映射到宿主机）。
+# 因此这里开启 --xf-trusted：限速/审计拿到的是手机真实 IP（Caddy 追加进 X-Forwarded-For）。
+services:
+  relay:
+    build: .
+    image: freeremote-relay:latest
+    restart: unless-stopped
+    expose:
+      - "8080"               # 仅 compose 内网可达，不对公网开放
+    environment:
+      RELAY_DEVICES: "${RELAY_DEVICES:?请在 .env 中设置 RELAY_DEVICES}"
+      RELAY_STRICT: "${RELAY_STRICT:-1}"
+    command: ["python", "relay.py", "--port", "8080", "--xf-trusted"]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"              # HTTP -> 自动跳转 HTTPS
+      - "443:443"            # HTTPS / wss
+    environment:
+      DOMAIN: "${DOMAIN:?请在 .env 中设置 DOMAIN，如 relay.example.com}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - relay
+
+volumes:
+  caddy_data:
+  caddy_config:

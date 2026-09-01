@@ -1,0 +1,21 @@
+# Fly.io 配置 —— 部署后访问 https://<app>.fly.dev （见教程“配置 HTTPS”）
+# 用法：fly launch --name <应用名> --region <区域> --no-deploy
+#       把本文件放仓库根目录（连同 Dockerfile），然后 fly deploy。
+
+app = "freeremote-relay"          # 改成你的应用名（全局唯一）
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+
+[[http_service]]
+  internal_port = 8080           # 容器内 relay 监听的端口
+  force_https = true             # 强制 https：手机端页面自动走 wss
+  auto_stop_machines = false     # 关键：不让机器因空闲而休眠（中继需常驻）
+  min_machines_running = 1       # 关键：始终保留 1 台在运行
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

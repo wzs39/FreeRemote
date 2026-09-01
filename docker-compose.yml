@@ -1,0 +1,25 @@
+# FreeRemote 中继服务器 —— Docker Compose 直连版（HTTP）
+#
+# 用法：
+#   1. 在 .env 里配置 RELAY_DEVICES（识别码:口令）与 RELAY_STRICT
+#   2. docker compose up -d --build
+#   3. 手机访问 http://<服务器IP>:9090/ 输入识别码+口令登录
+#
+# 注意：这是「直接暴露」版，未加 TLS。公网使用请用 docker-compose.https.yml
+# （Caddy 自动 HTTPS）。直连版不要开 --xf-trusted，否则客户端可伪造 XFF 绕过限速。
+services:
+  relay:
+    build: .
+    image: freeremote-relay:latest
+    restart: unless-stopped
+    ports:
+      - "9090:8080"          # 宿主机 9090 -> 容器内 8080
+    environment:
+      RELAY_DEVICES: "${RELAY_DEVICES:?请在 .env 中设置 RELAY_DEVICES，如 TEST01:你的强口令}"
+      RELAY_STRICT: "${RELAY_STRICT:-1}"
+    command: ["python", "relay.py", "--port", "8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8080/mode')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

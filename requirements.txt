@@ -1,0 +1,6 @@
+aiohttp>=3.10
+mss>=9.0
+Pillow>=10.4
+pyautogui>=0.9.54
+pyperclip>=1.9
+qrcode>=7.4

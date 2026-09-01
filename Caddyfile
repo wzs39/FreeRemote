@@ -1,0 +1,7 @@
+# Caddy 自动 HTTPS：把 ${DOMAIN} 的流量转发给中继容器。
+# 证书由 Let's Encrypt 自动申请/续期，HTTP 自动 301 跳转 HTTPS。
+# WebSocket（/ctl /vstream /pc/ws 等）由 Caddy 原生代理，无需额外配置。
+{$DOMAIN} {
+    encode zstd gzip
+    reverse_proxy relay:8080
+}

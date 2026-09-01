@@ -1,0 +1,10 @@
+# 不让这些文件进 Docker 构建上下文 / 镜像
+.venv
+__pycache__
+*.pyc
+*.log
+*.pem
+*.key
+.git
+freeremote-relay.tar
+lucky/
