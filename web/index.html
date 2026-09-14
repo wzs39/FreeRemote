@@ -78,13 +78,19 @@
     display: flex; align-items: center; justify-content: center;
     background: #0d0f14; touch-action: none; }
   #wrap { position: relative; width: 100%; height: 100%; display: flex;
-    align-items: center; justify-content: center; }
+    align-items: center; justify-content: center; overflow: hidden; }
   #screen { max-width: 100%; max-height: 100%; object-fit: contain;
     user-select: none; -webkit-user-select: none; touch-action: none; }
   #vwrap { position: relative; display: none; line-height: 0; }
   #vwrap.show { display: block; }
   #vcanvas { display: block; touch-action: none; }
   #ccursor { position: absolute; left: 0; top: 0; pointer-events: none; }
+  /* 捏合缩放：对监看视图整体做 CSS 变换（transform 不触发重排/重绘流） */
+  #zoombox { will-change: transform; transform-origin: 0 0; }
+  #zoomhint { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 47;
+    background: rgba(20,23,31,.88); color: #bcd0ff; font-size: 12px; padding: 6px 12px;
+    border-radius: 14px; pointer-events: none; opacity: 0; transition: opacity .3s; }
+  #zoomhint.show { opacity: 1; }
 
   /* 底部工具栏 */
   #toolbar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
@@ -127,6 +133,32 @@
   body.onehand #wrap { margin-bottom: 148px; }
   body.onehand #filepanel { padding-bottom: 148px; }
   body.onehand #kbpanel { padding-bottom: 148px; }
+
+  /* 大屏模式：隐藏顶栏与侧栏，监看区铺满全屏，控制钮收进悬浮条 */
+  body.big #topbar { display: none; }
+  body.big { grid-template-columns: 1fr !important;
+    grid-template-rows: minmax(0, 1fr) !important;
+    grid-template-areas: "stage" !important; }
+  /* #side 隐藏自身但让子元素（toolbar/kbpanel/filepanel）继续渲染为悬浮层 */
+  body.big #side { display: contents; }
+  body.big #toolbar { position: fixed; left: auto; bottom: auto;
+    right: 8px; top: 8px; z-index: 45; width: 158px;
+    flex-direction: column; gap: 6px; padding: 8px 6px;
+    background: rgba(20,23,31,.92); border: 1px solid #232936; border-radius: 14px;
+    box-shadow: 0 6px 22px rgba(0,0,0,.5); }
+  body.big #toolbar .row { gap: 6px; }
+  body.big #toolbar button { min-height: 46px; font-size: 13px; padding: 6px 2px; }
+  body.big #kbpanel { position: fixed; left: 8px; right: 174px; top: 8px; z-index: 46;
+    max-height: 60vh; overflow-y: auto; background: rgba(20,23,31,.97);
+    border: 1px solid #232936; border-radius: 14px; }
+  body.big #filepanel { position: fixed; left: 8px; right: 174px; top: 8px; z-index: 46;
+    max-height: 60vh; background: rgba(20,23,31,.97); border: 1px solid #232936;
+    border-radius: 14px; }
+  /* 大屏悬浮回主界面按钮 */
+  #big-exit { position: fixed; left: 8px; bottom: calc(10px + env(safe-area-inset-bottom));
+    z-index: 46; padding: 10px 16px; border: 1px solid #2b6df6; border-radius: 12px;
+    background: rgba(20,23,31,.92); color: #bcd0ff; font-size: 13px; display: none; }
+  body.big #big-exit { display: block; }
 
   /* 设置面板 */
   #setpanel { position: fixed; inset: 0; z-index: 55; background: rgba(10,12,16,.92);
@@ -186,14 +218,17 @@
 </div>
 
 <div id="stage">
-  <div id="wrap">
-    <img id="screen" alt="远程桌面" draggable="false">
-    <div id="vwrap">
-      <canvas id="vcanvas"></canvas>
-      <canvas id="ccursor"></canvas>
+  <div id="zoombox">
+    <div id="wrap">
+      <img id="screen" alt="远程桌面" draggable="false">
+      <div id="vwrap">
+        <canvas id="vcanvas"></canvas>
+        <canvas id="ccursor"></canvas>
+      </div>
     </div>
   </div>
 </div>
+<div id="zoomhint" hidden>已放大 · 双击空白处复位</div>
 
 <div id="side">
 
@@ -244,6 +279,8 @@
 
 <div id="rot" hidden>↻ 建议横屏使用，控制更顺手</div>
 
+<button id="big-exit">⛶ 退出大屏</button>
+
 <div id="setpanel" hidden>
   <div class="box">
     <h2>操作设置</h2>
@@ -259,8 +296,18 @@
         <button data-v="1" class="on">中</button>
         <button data-v="1.8">快</button>
       </span></div>
+    <div class="set-row"><span>画面分辨率</span>
+      <span class="seg" id="set-res">
+        <button data-v="auto">自动</button>
+        <button data-v="0.25">省流</button>
+        <button data-v="0.6">标准</button>
+        <button data-v="1">清晰</button>
+        <button data-v="1.5">超清</button>
+      </span></div>
     <div class="set-row"><span>单手模式（工具栏贴底）</span>
       <button id="set-onehand" class="toggle">关</button></div>
+    <div class="set-row"><span>大屏模式（全屏监看+悬浮控制）</span>
+      <button id="set-big" class="toggle">关</button></div>
     <button id="set-close">完成</button>
   </div>
 </div>
@@ -396,6 +443,7 @@
     ws.onopen = function () {
       wsOk = true; dot.className = "dot ok";
       if (!relay) statusEl.textContent = "已连接";
+      if (typeof resScale !== "undefined" && resScale !== "auto") setRes(resScale); // 重连后恢复自定义分辨率
     };
     ws.onclose = function () {
       wsOk = false; dot.className = "dot bad";
@@ -415,10 +463,51 @@
     };
   }
 
-  /* ---------- 触摸手势：单击=左键 双击=双击 长按=右键 拖动=移动 双指=滚轮 ---------- */
+  /* ---------- 触摸手势：单击=左键 双击=双击 长按=右键 拖动=移动 双指=滚轮/缩放 ---------- */
   var pointers = new Map();
   var pressTimer = null, moved = false, multi = false, lastCentroid = null;
   var sens = 1, wheelSpeed = 1, lastSent = null, lastTap = null;
+
+  /* ---------- 捏合缩放（本地视图变换，不影响推流） ----------
+     双指捏合=缩放+平移，缩放后单指拖动=平移画面，双击=复位。
+     只改 #zoombox 的 CSS transform，零重绘成本，推流帧率不受影响。 */
+  var zoom = { s: 1, x: 0, y: 0 };
+  var pinch = null;          // { dist, cx, cy, s, x, y } 捏合起始状态
+  var panning = false;       // 缩放后的单指平移
+  var panStart = null;       // { px, py, x, y }
+  var zoomTap = null;        // 双击复位检测
+  var ZOOM_MIN = 1, ZOOM_MAX = 5;
+  var zoombox = $("zoombox"), zoomhint = $("zoomhint");
+
+  function applyZoom() {
+    zoombox.style.transform = "translate(" + zoom.x + "px," + zoom.y + "px) scale(" + zoom.s + ")";
+    if (zoomhint) {
+      var on = zoom.s > 1.02;
+      zoomhint.hidden = !on;
+      zoomhint.classList.toggle("show", on);
+    }
+  }
+  function resetZoom() {
+    zoom.s = 1; zoom.x = 0; zoom.y = 0;
+    applyZoom();
+  }
+  function clampZoom() {
+    zoom.s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoom.s));
+    // 限制平移范围：缩放后画面边缘不允许拖出视口中心太远
+    if (zoom.s > 1) {
+      var r = view.getBoundingClientRect();
+      var vw = window.innerWidth, vh = window.innerHeight;
+      var halfW = r.width * zoom.s / 2, halfH = r.height * zoom.s / 2;
+      var maxX = Math.max(0, halfW - vw / 2), maxY = Math.max(0, halfH - vh / 2);
+      zoom.x = Math.max(-maxX, Math.min(maxX, zoom.x));
+      zoom.y = Math.max(-maxY, Math.min(maxY, zoom.y));
+    } else { zoom.x = 0; zoom.y = 0; }
+  }
+  function pinchState() {
+    var pts = Array.from(pointers.values());
+    var dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    return { dist: Math.hypot(dx, dy) || 1, cx: (pts[0].x + pts[1].x) / 2, cy: (pts[0].y + pts[1].y) / 2 };
+  }
 
   function centroid() {
     var xs = 0, ys = 0, n = 0;
@@ -429,13 +518,20 @@
   stage.addEventListener("pointerdown", function (e) {
     if (!wsOk || e.button > 0) return;
     e.preventDefault();
-    stage.setPointerCapture(e.pointerId);
+    try { stage.setPointerCapture(e.pointerId); } catch (err) {}
     if (pointers.size === 0) { moved = false; multi = false; lastSent = null; }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, t: Date.now() });
     if (pointers.size === 2) {
       multi = true;
       clearTimeout(pressTimer);
       lastCentroid = centroid();
+      // 开始捏合：记录起始距离与当前变换
+      var st = pinchState();
+      pinch = { dist: st.dist, cx: st.cx, cy: st.cy, s: zoom.s, x: zoom.x, y: zoom.y };
+    } else if (pointers.size === 1 && zoom.s > 1.02) {
+      // 已放大：单指拖动 = 平移画面（不移动远端鼠标）
+      panning = true; multi = true;
+      panStart = { px: e.clientX, py: e.clientY, x: zoom.x, y: zoom.y };
     } else if (pointers.size === 1 && !multi) {
       clearTimeout(pressTimer);
       pressTimer = setTimeout(function () {
@@ -455,6 +551,24 @@
     var p = pointers.get(e.pointerId);
     var dx = e.clientX - p.x, dy = e.clientY - p.y;
     p.x = e.clientX; p.y = e.clientY;
+    if (pinch && pointers.size === 2) {
+      // 捏合缩放：缩放跟随双指距离，平移跟随双指中点
+      var st = pinchState();
+      zoom.s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinch.s * (st.dist / pinch.dist)));
+      zoom.x = pinch.x + (st.cx - pinch.cx);
+      zoom.y = pinch.y + (st.cy - pinch.cy);
+      clampZoom();
+      applyZoom();
+      lastCentroid = centroid();
+      return;
+    }
+    if (panning && pointers.size === 1) {
+      zoom.x = panStart.x + (e.clientX - panStart.px);
+      zoom.y = panStart.y + (e.clientY - panStart.py);
+      clampZoom();
+      applyZoom();
+      return;
+    }
     if (pointers.size === 1 && !multi) {
       if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
       if (moved) {
@@ -482,7 +596,23 @@
     var p = pointers.get(e.pointerId);
     clearTimeout(pressTimer);
     var wasOne = pointers.size === 1;
+    var wasPinch = !!pinch;
     pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) { panning = false; panStart = null; lastCentroid = null; }
+    if (wasPinch || panning) { moved = true; return; }  // 缩放/平移不触发点击
+    if (zoom.s > 1.02 && wasOne) {
+      // 缩放状态下：双击（非拖动）= 复位
+      var now = Date.now();
+      if (!moved && lastTap && now - lastTap.t < 300 &&
+          Math.abs(p.x - lastTap.x) < 34 && Math.abs(p.y - lastTap.y) < 34) {
+        resetZoom();
+        lastTap = null;
+        return;
+      }
+      if (!moved) lastTap = { t: now, x: p.x, y: p.y };
+      return; // 缩放状态下单击不发送鼠标点击，避免误操作
+    }
     if (wasOne && !multi) {
       if (!moved) {
         var f = clientToFrame(p.x, p.y);
@@ -711,7 +841,9 @@
       var s = JSON.parse(localStorage.getItem("fr-prefs") || "{}");
       if (typeof s.sens === "number") sens = s.sens;
       if (typeof s.wheel === "number") wheelSpeed = s.wheel;
+      if (s.res !== undefined) resScale = s.res;
       if (s.onehand) document.body.classList.add("onehand");
+      if (s.big) document.body.classList.add("big");
     } catch (e) {}
     syncPrefsUI();
   }
@@ -722,17 +854,32 @@
     document.querySelectorAll("#set-wheel button").forEach(function (b) {
       b.classList.toggle("on", parseFloat(b.dataset.v) === wheelSpeed);
     });
+    document.querySelectorAll("#set-res button").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.v === String(resScale));
+    });
     var oh = document.body.classList.contains("onehand");
     $("set-onehand").classList.toggle("on", oh);
     $("set-onehand").textContent = oh ? "开" : "关";
+    var big = document.body.classList.contains("big");
+    $("set-big").classList.toggle("on", big);
+    $("set-big").textContent = big ? "开" : "关";
   }
   function savePrefs() {
     try {
       localStorage.setItem("fr-prefs", JSON.stringify({
-        sens: sens, wheel: wheelSpeed,
-        onehand: document.body.classList.contains("onehand")
+        sens: sens, wheel: wheelSpeed, res: resScale,
+        onehand: document.body.classList.contains("onehand"),
+        big: document.body.classList.contains("big")
       }));
     } catch (e) {}
+  }
+  /* 画面分辨率：改变推流帧的像素尺寸（服务器 setres 指令） */
+  var resScale = "auto";
+  function setRes(v) {
+    resScale = v;
+    if (v === "auto") send({ t: "setres", scale: null });
+    else send({ t: "setres", scale: parseFloat(v) });
+    setTimeout(fetchInfo, 700); // 刷新分辨率显示
   }
   $("b-set").addEventListener("click", function () {
     $("setpanel").hidden = !$("setpanel").hidden;
@@ -748,8 +895,21 @@
       wheelSpeed = parseFloat(b.dataset.v); syncPrefsUI(); savePrefs();
     });
   });
+  document.querySelectorAll("#set-res button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      setRes(b.dataset.v); syncPrefsUI(); savePrefs();
+    });
+  });
   $("set-onehand").addEventListener("click", function () {
     document.body.classList.toggle("onehand");
+    syncPrefsUI(); savePrefs();
+  });
+  $("set-big").addEventListener("click", function () {
+    document.body.classList.toggle("big");
+    syncPrefsUI(); savePrefs();
+  });
+  $("big-exit").addEventListener("click", function () {
+    document.body.classList.remove("big");
     syncPrefsUI(); savePrefs();
   });
   loadPrefs();

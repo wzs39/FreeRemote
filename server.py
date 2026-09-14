@@ -80,13 +80,65 @@ QUALITY_PRESETS = {
 
 BOUNDARY = b"frame"
 
-# 口令字符集：去掉易混淆字符（0/O、1/l/I），方便手机端手输
-TOKEN_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ"
+# 口令词表：全部小写、短小、无易混淆字母，方便手输与口头转述
+TOKEN_WORDS = (
+    "maple otter luna nova pixel mango tiny echo sunny comet lucky "
+    "fox river cloud happy panda kiwi amber noble cactus cedar cherry "
+    "cobra coral daisy delta drift ember falcon flint grove hazel "
+    "iris jade lemon lotus meadow neon olive pearl raven solar tulip "
+    "vivid wren zebra anchor brush camel dune fable garnet herb jolly "
+    "koala mint nutmeg opal quail reef sage thyme"
+).split()
 
 
-def gen_token(n: int = 12) -> str:
-    """生成易读、防混淆的随机口令（默认 12 位，熵约 2^69）。"""
-    return "".join(secrets.choice(TOKEN_ALPHABET) for _ in range(n))
+def gen_token() -> str:
+    """直观口令：3 个小写单词 + 2 位数字，如 maple-otter-luna-724。
+
+    组合约 75^3 * 90 ≈ 2^30，配合登录限速足够安全，且比随机字符串
+    好念、好记、好手输（口头转述也不容易错）。
+    """
+    words = "-".join(secrets.choice(TOKEN_WORDS) for _ in range(3))
+    return f"{words}-{secrets.randbelow(90) + 10}"
+
+
+def save_token_file(token: str, expire) -> None:
+    """保存口令到 token.txt；expire=None 表示永久。内容无变化时不写盘（避免触发热更新）。"""
+    cf = BASE_DIR / "token.txt"
+    content = token if not expire else "{}\n{}".format(token, expire)
+    try:
+        if cf.exists() and cf.read_text(encoding="utf-8").strip() == content.strip():
+            return
+    except OSError:
+        pass
+    cf.write_text(content, encoding="utf-8")
+
+
+def load_token_file():
+    """读 token.txt → (口令, 过期时间戳或 None=永久)。
+
+    兼容历史格式（纯口令 / 口令+时间戳 / 旧随机串）。已过期时不换口令，
+    只把有效期延长 1 年——口令不变，手机书签永远不用更新。
+    """
+    cf = BASE_DIR / "token.txt"
+    if not cf.exists():
+        return None, None
+    try:
+        lines = cf.read_text(encoding="utf-8").strip().splitlines()
+    except OSError:
+        return None, None
+    if not lines or not lines[0].strip():
+        return None, None
+    token = lines[0].strip()
+    expire = None
+    if len(lines) >= 2:
+        try:
+            expire = int(lines[1].strip())
+        except ValueError:
+            expire = None
+        if expire is not None and time.time() > expire:
+            expire = int(time.time()) + 365 * 86400  # 已过期：同口令延长 1 年
+    save_token_file(token, expire)  # 归一化存储（永久口令只留一行）
+    return token, expire
 
 
 def is_screen_locked() -> bool:
@@ -320,6 +372,7 @@ class Streamer:
         self._monitor_idx = monitor_idx
         self.monitor = self.sct.monitors[monitor_idx]
         self.fps = max(1, min(fps, 30))
+        self.user_scale = None  # 手机端设置的额外缩放（None=跟随画质档位）
         self.set_preset(preset)
         self.health = monitor  # 健康监控（自检/自愈）
         self._fallback = None  # 采集失败时发送的占位图
@@ -343,7 +396,17 @@ class Streamer:
         if preset not in QUALITY_PRESETS:
             preset = "mid"
         self.preset = preset
-        self.scale, self.quality = QUALITY_PRESETS[preset]
+        base_scale, self.quality = QUALITY_PRESETS[preset]
+        # 手机端自定义分辨率优先；未设置时跟随画质档位
+        self.scale = self.user_scale if self.user_scale else base_scale
+
+    def set_resolution(self, scale):
+        """手机端自定义推流分辨率：scale=0.25~2.0；None=恢复跟随画质档位。"""
+        if scale is None:
+            self.user_scale = None
+        else:
+            self.user_scale = max(0.2, min(float(scale), 2.0))
+        self.set_preset(self.preset)
 
     @property
     def frame_size(self):
@@ -685,6 +748,14 @@ def apply_command(streamer: Streamer, cmd: dict):
         elif t == "setpreset":
             # 手机端切换画质（中继模式下由电脑端本地编码）
             streamer.set_preset(cmd.get("preset", "mid"))
+
+        elif t == "setres":
+            # 手机端自定义推流分辨率（"auto"=恢复跟随画质档位）
+            v = cmd.get("scale", None)
+            if v in (None, "auto", ""):
+                streamer.set_resolution(None)
+            else:
+                streamer.set_resolution(float(v))
 
         else:
             log("WARN", f"未知指令：{cmd}")
@@ -1042,6 +1113,14 @@ async def _command_loop(ws, streamer, loop):
             if cmd.get("t") == "setpreset":
                 streamer.set_preset(cmd.get("preset", "mid"))
                 await send_device_info(ws, streamer)
+            elif cmd.get("t") == "setres":
+                # 手机端自定义推流分辨率（"auto"=恢复跟随画质档位）
+                v = cmd.get("scale", None)
+                if v in (None, "auto", ""):
+                    streamer.set_resolution(None)
+                else:
+                    streamer.set_resolution(float(v))
+                await send_device_info(ws, streamer)
             else:
                 await loop.run_in_executor(None, apply_command, streamer, cmd)
         elif msg.type == WSMsgType.ERROR:
@@ -1371,7 +1450,8 @@ async def info_handler(request):
     s = request.app["streamer"]
     w, h = s.frame_size
     return web.json_response(
-        {"w": w, "h": h, "platform": sys.platform, "preset": s.preset}
+        {"w": w, "h": h, "platform": sys.platform, "preset": s.preset,
+         "scale": s.scale, "user_scale": s.user_scale}
     )
 
 
@@ -1515,12 +1595,11 @@ def main():
     parser.add_argument("--monitor", type=int, default=1, help="显示器编号，1=主屏（默认 1）")
     parser.add_argument("--share-dir", default=default_share_dir(),
                         help="文件互传目录（默认自动选非系统盘专用文件夹 D:\\FreeRemoteFiles）")
-    parser.add_argument("--token", default="", help="访问口令（默认随机生成）")
+    parser.add_argument("--token", default="", help="访问口令（默认读 token.txt，无则自动生成永久口令）")
     parser.add_argument("--once", action="store_true",
                         help="一次性口令模式：生成 10 分钟有效的临时口令/链接，过期自动作废（不写盘）")
-    parser.add_argument("--renew-token", nargs="?", const="7", default=None,
-                        help="重新生成 token.txt 口令并设置有效期（默认 7 天；可用 --renew-token 30 指定 30 天；\n"
-                             "0 表示永久）")
+    parser.add_argument("--renew-token", nargs="?", const="0", default=None,
+                        help="更换新口令并写入 token.txt（默认永久有效；--renew-token 30 = 30 天有效）")
     parser.add_argument("--no-auth", action="store_true", help="关闭口令校验（仅限可信局域网）")
     parser.add_argument("--allow-ips", default="",
                         help="IP 白名单，逗号分隔（默认允许所有 IP，需配合口令）")
@@ -1536,26 +1615,20 @@ def main():
     args = parser.parse_args()
 
     if args.renew_token is not None:
-        # 重新生成带有效期的口令并写入 token.txt，打印所有链接后退出
+        # 更换口令并写入 token.txt：默认永久有效；--renew-token 30 = 30 天；0 = 永久
         try:
-            days = int(args.renew_token or "7")
+            days = int(args.renew_token or "0")
         except ValueError:
-            days = 7
+            days = 0
         new_tok = gen_token()
-        cf = BASE_DIR / "token.txt"
-        if days and days > 0:
-            expire = int(time.time()) + days * 86400
-            cf.write_text("{}\n{}".format(new_tok, expire), encoding="utf-8")
-            out("=" * 58)
-            out(" 已生成新口令，{} 天后自动过期：".format(days))
-            out(f"   访问口令 : {new_tok}")
+        expire = int(time.time()) + days * 86400 if days > 0 else None
+        save_token_file(new_tok, expire)
+        out("=" * 58)
+        out(" 已生成新口令（{}）：".format(f"{days} 天有效" if days else "永久有效"))
+        out(f"   访问口令 : {new_tok}")
+        if expire:
             out(f"   有效期至 : {time.strftime('%Y-%m-%d %H:%M', time.localtime(expire))}")
-        else:
-            cf.write_text(new_tok, encoding="utf-8")
-            out("=" * 58)
-            out(" 已生成新口令（永久有效）：")
-            out(f"   访问口令 : {new_tok}")
-        out("   ⚠ 旧口令/旧书签已全部失效，请用下面的新链接更新手机书签")
+        out("   ⚠ 旧口令已作废，请用下面的新链接更新手机书签")
         primary, ips = lan_ips()
         out(f"   手机访问 : http://{primary}:{args.port}/?token={new_tok}")
         ts = tailscale_ips()
@@ -1566,42 +1639,20 @@ def main():
 
     token_expire = None
     if not args.token:
-        # 固定口令优先：token.txt 存在则用其中的口令（支持 纯口令 或 口令+换行时间戳 两种格式）
-        cf = BASE_DIR / "token.txt"
-        if cf.exists():
-            try:
-                lines_t = cf.read_text(encoding="utf-8").strip().splitlines()
-            except OSError:
-                lines_t = []
-            if lines_t and lines_t[0]:
-                args.token = lines_t[0]
-                if len(lines_t) >= 2:
-                    try:
-                        exp = int(lines_t[1])
-                        if time.time() > exp:
-                            # 过期：自动续期 7 天并换新，不再静默回退随机口令（避免手机书签悄悄失效）
-                            new_tok = gen_token()
-                            expire = int(time.time()) + 7 * 86400
-                            cf.write_text("{}\n{}".format(new_tok, expire), encoding="utf-8")
-                            args.token = new_tok
-                            token_expire = expire
-                            log("WARN", f"token.txt 口令已于 {time.strftime('%Y-%m-%d %H:%M', time.localtime(exp))} 过期，"
-                                         f"已自动续期 7 天换新：{new_tok}（请用启动横幅的新链接更新手机书签）")
-                        else:
-                            token_expire = exp
-                    except ValueError:
-                        pass
-                if args.token:
-                    log("INFO", f"已使用固定口令（token.txt）：{args.token}")
-                    if token_expire:
-                        left = int(token_expire - time.time())
-                        log("INFO", f"口令有效期至 {time.strftime('%Y-%m-%d %H:%M', time.localtime(token_expire))}，剩余 "
-                                     f"{left // 86400} 天 {left % 86400 // 3600} 小时")
-                        if left < 3 * 86400:
-                            log("WARN", "口令剩余不足 3 天，建议现在运行 renew-token.bat 换新，避免到期后手机连不上")
+        # 固定口令优先：读 token.txt（新格式 = 永久有效；兼容旧格式，自动归一化）
+        args.token, token_expire = load_token_file()
+        if args.token:
+            if token_expire:
+                left = int(token_expire - time.time())
+                log("INFO", f"已使用固定口令（token.txt）：{args.token}"
+                            f"（有效期至 {time.strftime('%Y-%m-%d %H:%M', time.localtime(token_expire))}，剩 {left // 86400} 天）")
+            else:
+                log("INFO", f"已使用固定口令（token.txt）：{args.token}（永久有效）")
     if not args.token:
+        # 没有口令文件：生成直观口令并保存（永久有效，重启/换网都不变）
         args.token = gen_token()
-        log("WARN", f"未使用任何固定口令，本次启动随机口令：{args.token}（想长期用请 --renew-token 生成固定口令）")
+        save_token_file(args.token, None)
+        log("INFO", f"已生成新口令（token.txt，永久有效）：{args.token}")
     args.allow_ips = set(x.strip() for x in args.allow_ips.split(",") if x.strip())
 
     pyautogui.FAILSAFE = False  # 远程控制时关闭"鼠标移到左上角即中止"的安全熔断
@@ -1611,7 +1662,7 @@ def main():
         if not args.id:
             args.id = random_id()
         if not args.password:
-            args.password = secrets.token_urlsafe(8)
+            args.password = gen_token()
         sys.exit(asyncio.run(relay_client(args)) or 0)
         return
 
@@ -1638,14 +1689,13 @@ def main():
     if ts:
         out(f"   手机访问(Tailscale跨网) : http://{ts[0]}:{args.port}/?token={args.token}   ← 不同网络用这个")
     if args.token and not args.no_auth:
-        out(f"   访问口令 : {args.token}")
         if token_expire:
             left = int(token_expire - time.time())
-            out(f"   口令有效期 : 至 {time.strftime('%Y-%m-%d %H:%M', time.localtime(token_expire))}"
-                f"（剩 {left // 86400} 天 {left % 86400 // 3600} 小时）")
-            out("     过期后请运行 renew-token.bat 重新生成")
-            if left < 3 * 86400:
-                out("     ⚠ 剩余不足 3 天，建议现在运行 renew-token.bat 换新")
+            out(f"   访问口令 : {args.token}（有效期至 "
+                f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(token_expire))}，剩 {left // 86400} 天）")
+        else:
+            out(f"   访问口令 : {args.token}（永久有效，保存在 token.txt）")
+        out("   变更口令 : 双击 renew-token.bat（换新口令后手机书签同步更新）")
     if args.once:
         out("  ────────────────────────────────────────────────")
         out("   一次性口令（10 分钟有效，过期自动作废，不写盘）：")
@@ -1663,8 +1713,6 @@ def main():
         out(f"   IP白名单 : {', '.join(sorted(args.allow_ips))}（其余 IP 一律拒绝）")
     if args.tls_cert and args.tls_key:
         out("   TLS      : 已启用 HTTPS（手机访问请用 https://）")
-    scheme = "https" if (args.tls_cert and args.tls_key) else "http"
-    print_qr(f"{scheme}://{primary}:{args.port}/?token={args.token}")
     out(f"   日志     : {LOG_FILE.relative_to(BASE_DIR)}（UTF-8，错误行含 [ERROR]，可 grep）")
     out("   停止     : 按 Ctrl+C")
     out("=" * 58)
