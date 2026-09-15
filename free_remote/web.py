@@ -233,9 +233,9 @@ def make_app(args) -> web.Application:
     streamer = Streamer(args.monitor, args.preset, args.fps, monitor)
     broadcaster = Broadcaster(streamer)
     frames = FrameSource(streamer)
-    # 让健康监控知道谁在观看（无观看者时才启用"繁忙暂停采集"自保）
-    streamer._owner_fs = frames
-    streamer._owner_bc = broadcaster
+    # 观看源自注册：观看者计数的唯一事实来源在 Streamer（供健康监控查询）
+    streamer.register_view_source(frames)
+    streamer.register_view_source(broadcaster)
     app = web.Application()
     app["args"] = args
     app["streamer"] = streamer

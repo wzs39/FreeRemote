@@ -26,6 +26,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 WATCH_FILES = ["server.py", "token.txt", "web/index.html",
                "free_remote/config.py", "free_remote/capture.py", "free_remote/command.py",
+               "free_remote/injection.py",
                "free_remote/web.py", "free_remote/webcore.py", "free_remote/relay.py",
                "free_remote/fileshare.py", "free_remote/health.py", "free_remote/netinfo.py",
                "free_remote/tokens.py", "free_remote/win_input.py", "free_remote/logging_util.py"]

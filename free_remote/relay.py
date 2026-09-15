@@ -9,7 +9,6 @@ import sys
 from urllib.parse import quote
 
 import aiohttp
-import pyautogui
 from aiohttp import WSMsgType
 
 from .capture import BlockEncoder, Streamer, _pace, cursor_frame
@@ -87,7 +86,6 @@ async def relay_client(args):
             _s.reconfigure(errors="replace")
         except Exception:
             pass
-    pyautogui.FAILSAFE = False
     monitor = HealthMonitor(args.fps)
     streamer = Streamer(args.monitor, args.preset, args.fps, monitor)
     orig = args.relay

@@ -5,10 +5,10 @@ import asyncio
 import sys
 import time
 
-import pyautogui
 from aiohttp import web
 
 from .config import BASE_DIR, IS_WIN, LOG_FILE, QUALITY_PRESETS
+from .injection import IS_WIN_ENGINE  # 导入时即设置 FAILSAFE/PAUSE=0
 from .fileshare import default_share_dir
 from .logging_util import log, out
 from .netinfo import lan_ips, tailscale_ips
@@ -92,10 +92,7 @@ def main():
         log("INFO", f"已生成新口令（token.txt，永久有效）：{args.token}")
     args.allow_ips = set(x.strip() for x in args.allow_ips.split(",") if x.strip())
 
-    pyautogui.FAILSAFE = False  # 远程控制时关闭"鼠标移到左上角即中止"的安全熔断
-    # 关键：pyautogui 默认每次注入后 sleep 0.1s，实测每次移动/点击延迟 100ms。
-    # 远程控制必须即时响应，置 0（实测 moveTo/click 从 ~100ms 降到 <2ms）。
-    pyautogui.PAUSE = 0
+    # 注入引擎参数（FAILSAFE/PAUSE=0）已由 free_remote.injection 导入时统一设置
 
     if args.relay:
         # ---- 识别码模式：跨网络，经中继服务器 ----
@@ -153,6 +150,7 @@ def main():
         out(f"   IP白名单 : {', '.join(sorted(args.allow_ips))}（其余 IP 一律拒绝）")
     if args.tls_cert and args.tls_key:
         out("   TLS      : 已启用 HTTPS（手机访问请用 https://）")
+    out(f"   注入引擎 : {'Windows SendInput（直通）' if IS_WIN_ENGINE else 'pyautogui（回退）'}")
     out(f"   日志     : {LOG_FILE.relative_to(BASE_DIR)}（UTF-8，错误行含 [ERROR]，可 grep）")
     out("   停止     : 按 Ctrl+C")
     out("=" * 58)

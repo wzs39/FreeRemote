@@ -1,30 +1,20 @@
 # -*- coding: utf-8 -*-
 """控制指令：手机指令 -> 系统输入注入（Windows 走 SendInput，其余 pyautogui）。"""
-import pyautogui
+import sys
+from typing import TYPE_CHECKING
+
 import pyperclip
 
-from .config import IS_MAC
+from .injection import INJ, force_release_all_mods
 from .logging_util import log
-from . import win_input
 
-Streamer = None  # 仅类型注解用；运行时由 web/relay 传入实例（避免循环导入）
+if TYPE_CHECKING:  # 仅类型检查用，运行时零依赖（避免 capture<-command 环）
+    from .capture import Streamer
 
-# ---------------------------------------------------------------- 控制指令
+# 统一注入门面（injection.py 是基础设施层，capture 同样只依赖它）
+_INJ = INJ
 
-def _is_ascii_printable(s: str) -> bool:
-    """可打印 ASCII（字母/数字/空格/常见符号）→ 可直接逐键敲出，不依赖剪贴板。"""
-    return bool(s) and all(not (ord(c) < 0x20 or ord(c) > 0x7E) for c in s)
-
-
-def _paste_keys():
-    """粘贴组合键：macOS 用 Cmd+V，其它平台用 Ctrl+V。"""
-    return ["command", "v"] if IS_MAC else ["ctrl", "v"]
-
-
-# ---------------- 输入注入引擎（Windows: SendInput 直通；其它: pyautogui） ----------------
-# 统一调度点：所有鼠标/键盘注入都经 _INJ；Windows 下修饰键状态由
-# win_input._held 唯一持有（release_all 只释放真正按住的键）。
-_INJ = win_input if (win_input and win_input.available) else pyautogui
+__all__ = ["apply_command", "force_release_all_mods", "_INJ"]
 
 
 def _with_mods(mods, fn):
@@ -38,31 +28,17 @@ def _with_mods(mods, fn):
             _INJ.keyUp(k)
 
 
-_MOD_KEYS = ("ctrl", "alt", "shift", "win")
+def _is_ascii_printable(s: str) -> bool:
+    """可打印 ASCII（字母/数字/空格/常见符号）→ 可直接逐键敲出，不依赖剪贴板。"""
+    return bool(s) and all(not (ord(c) < 0x20 or ord(c) > 0x7E) for c in s)
 
 
-def force_release_all_mods(reason: str = ""):
-    """强制释放所有修饰键，防"卡键"。
-
-    场景：手机断线/息屏时 Ctrl 或 Win 正被按住 -> 电脑端键位卡死，
-    之后手机的一切点击都变成 Ctrl+点击/Win+点击，表现为"全部失灵"。
-    在控制连接断开时调用（websocket 心跳 30s 内必发现断线）。
-    Windows 下由 win_input._held 精确释放真正按住的键；其它平台盲发 keyUp 兜底。
-    """
-    if win_input and win_input.available:
-        n = win_input.release_all()
-    else:
-        n = 0
-        for k in _MOD_KEYS:
-            try:
-                pyautogui.keyUp(k)
-            except Exception:
-                pass
-    if reason:
-        log("INFO", f"已强制释放修饰键（{reason}，{n} 个按住状态），防卡键")
+def _paste_keys():
+    """粘贴组合键：macOS 用 Cmd+V，其它平台用 Ctrl+V。"""
+    return ["command", "v"] if sys.platform == "darwin" else ["ctrl", "v"]
 
 
-def apply_command(streamer: Streamer, cmd: dict):
+def apply_command(streamer: "Streamer", cmd: dict):
     """执行一条来自手机的指令。"""
     t = cmd.get("t")
     mods = [k for k in cmd.get("mods", []) if isinstance(k, str)]
@@ -140,4 +116,3 @@ def apply_command(streamer: Streamer, cmd: dict):
             log("WARN", f"未知指令：{cmd}")
     except Exception as exc:
         log("ERROR", f"指令失败 [{t}]：{exc}")
-

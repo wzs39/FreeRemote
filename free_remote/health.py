@@ -74,7 +74,7 @@ class HealthMonitor:
         now = time.monotonic()
         if now < self.paused_until:
             return True  # 暂停中
-        if len(self.slow_notes) >= 3 and (streamer is None or not self._has_viewers(streamer)):
+        if len(self.slow_notes) >= 3 and (streamer is None or streamer.viewer_count() == 0):
             self.paused_until = now + 5.0
             self.capture_pauses += 1
             self.slow_notes = []
@@ -83,11 +83,6 @@ class HealthMonitor:
                 self.add_remedy("检测到系统繁忙且无观看者，暂停屏幕采集 5 秒让出 CPU")
             return True
         return False
-
-    def _has_viewers(self, streamer) -> bool:
-        fs = getattr(streamer, "_owner_fs", None)
-        bc = getattr(streamer, "_owner_bc", None)
-        return bool((fs and fs.subs) or (bc and bc.subs))
 
     def add_remedy(self, action: str):
         self.remedies.append({"at": time.strftime("%H:%M:%S"), "action": action})

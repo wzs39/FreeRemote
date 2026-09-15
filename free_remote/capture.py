@@ -9,9 +9,9 @@ import mss
 import numpy as np
 from PIL import Image
 
-from .command import _INJ  # 统一注入调度（command 不依赖 capture，无环）
 from .config import QUALITY_PRESETS
 from .health import HealthMonitor
+from .injection import INJ
 from .logging_util import log
 
 class Streamer:
@@ -29,6 +29,15 @@ class Streamer:
         self.set_preset(preset)
         self.health = monitor  # 健康监控（自检/自愈）
         self._fallback = None  # 采集失败时发送的占位图
+        self._view_sources = []  # 观看源注册表（FrameSource/Broadcaster 自注册）
+
+    def register_view_source(self, src) -> None:
+        """观看源（有 .has_subscribers() 的对象）注册自己——所有权归采集管道。"""
+        self._view_sources.append(src)
+
+    def viewer_count(self) -> int:
+        """当前观看者总数（各观看源订阅者之和）。健康监控据此决定是否让出 CPU。"""
+        return sum(len(getattr(s, "subs", ())) for s in self._view_sources)
 
     def reinit(self):
         """采集连续失败时重建采集器（自愈）。"""
@@ -375,7 +384,7 @@ class BlockEncoder:
 def cursor_frame(streamer):
     """当前鼠标位置 → 帧坐标（用于客户端本地绘制光标）。"""
     try:
-        x, y = _INJ.position()
+        x, y = INJ.position()
     except Exception:
         return 0, 0
     m = streamer.monitor
