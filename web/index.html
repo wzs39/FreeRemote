@@ -30,17 +30,25 @@
   }
 
   /* 顶部状态栏 */
-  #topbar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
-    padding: 8px 10px; background: #14171f; border-bottom: 1px solid #232936;
+  #topbar { flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+    padding: 6px 8px; background: #14171f; border-bottom: 1px solid #232936;
     font-size: 13px; }
   #topbar .dot { width: 8px; height: 8px; border-radius: 50%; background: #f0b429; flex: none; }
   #topbar .dot.ok { background: #2ecc71; }
   #topbar .dot.bad { background: #e74c3c; }
   #topbar .spacer { flex: 1; }
-  #b-doctor, #b-files, #b-set { border: 1px solid #232936; background: #1d222e; color: #9aa4b8;
-    padding: 7px 12px; font-size: 13px; border-radius: 8px; cursor: pointer; flex: none; }
-  #b-set:active, #b-files:active, #b-doctor:active { background: #2b6df6; color: #fff; }
+  #b-doctor, #b-files, #b-set, #b-wake { border: 1px solid #232936; background: #1d222e; color: #9aa4b8;
+    min-width: 40px; min-height: 40px; padding: 0 9px; font-size: 17px; border-radius: 9px;
+    cursor: pointer; flex: none; }
+  #b-set:active, #b-files:active, #b-doctor:active, #b-wake:active { background: #2b6df6; color: #fff; }
   .ver { font-size: 10px; color: #555d6e; flex: none; }
+  /* 窄屏（手机竖屏）：进一步压缩顶栏，把空间留给画面 */
+  @media (max-width: 560px) {
+    #topbar { gap: 5px; padding: 5px 6px; }
+    #topbar #res, #topbar .ver { display: none; }
+    #b-doctor, #b-files, #b-set { min-width: 36px; min-height: 36px; padding: 0 7px; }
+    #qseg button { padding: 5px 7px; font-size: 11px; }
+  }
 
   /* 文件互传面板 */
   #filepanel { flex: 0 0 auto; background: #14171f; border-top: 1px solid #232936;
@@ -76,9 +84,9 @@
   /* 屏幕监看区 */
   #stage { flex: 1 1 auto; position: relative; min-height: 0;
     display: flex; align-items: center; justify-content: center;
-    background: #0d0f14; touch-action: none; }
+    background: #0d0f14; touch-action: none; overflow: hidden; }
   #wrap { position: relative; width: 100%; height: 100%; display: flex;
-    align-items: center; justify-content: center; overflow: hidden; }
+    align-items: center; justify-content: center; }
   #screen { max-width: 100%; max-height: 100%; object-fit: contain;
     user-select: none; -webkit-user-select: none; touch-action: none; }
   #vwrap { position: relative; display: none; line-height: 0; }
@@ -86,11 +94,19 @@
   #vcanvas { display: block; touch-action: none; }
   #ccursor { position: absolute; left: 0; top: 0; pointer-events: none; }
   /* 捏合缩放：对监看视图整体做 CSS 变换（transform 不触发重排/重绘流） */
-  #zoombox { will-change: transform; transform-origin: 0 0; }
+  #zoombox { will-change: transform; transform-origin: 50% 50%; }
   #zoomhint { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 47;
     background: rgba(20,23,31,.88); color: #bcd0ff; font-size: 12px; padding: 6px 12px;
     border-radius: 14px; pointer-events: none; opacity: 0; transition: opacity .3s; }
   #zoomhint.show { opacity: 1; }
+  /* 画面初始大小模式：铺宽/铺满时允许画面溢出容器（配合平移查看） */
+  #zoombox.fit-width #screen { max-width: none; max-height: 100%; width: 100vw; object-fit: fill; }
+  #zoombox.fit-width #vwrap { width: 100vw; }
+  #zoombox.fit-width #vcanvas { width: 100vw !important; height: auto !important; }
+  #zoombox.fit-full #screen { max-width: none; max-height: none; width: 100vw; height: 100vh; object-fit: fill; }
+  #zoombox.fit-full #vwrap { width: 100vw; height: 100vh; }
+  #zoombox.fit-full #vcanvas { width: 100vw !important; height: 100vh !important; }
+  #zoombox.fit-full, #zoombox.fit-width { overflow: visible; }
 
   /* 底部工具栏 */
   #toolbar { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
@@ -143,7 +159,7 @@
   body.big #side { display: contents; }
   body.big #toolbar { position: fixed; left: auto; bottom: auto;
     right: 8px; top: 8px; z-index: 45; width: 158px;
-    flex-direction: column; gap: 6px; padding: 8px 6px;
+    flex-direction: column; gap: 6px; padding: 8px 6px; touch-action: none;
     background: rgba(20,23,31,.92); border: 1px solid #232936; border-radius: 14px;
     box-shadow: 0 6px 22px rgba(0,0,0,.5); }
   body.big #toolbar .row { gap: 6px; }
@@ -206,9 +222,9 @@
   <span class="spacer"></span>
   <span id="res"></span>
   <span class="ver">v2.3</span>
-  <button id="b-wake" title="远程唤醒电脑" hidden>⚡ 唤醒</button>
-  <button id="b-doctor" title="自检">🩺 自检</button>
-  <button id="b-files" title="文件互传">📁 文件</button>
+  <button id="b-wake" title="远程唤醒电脑" hidden>⚡</button>
+  <button id="b-doctor" title="自检">🩺</button>
+  <button id="b-files" title="文件互传">📁</button>
   <button id="b-set" title="操作设置">⚙</button>
   <span class="seg" id="qseg">
     <button data-q="low">流畅</button>
@@ -248,6 +264,7 @@
     <button id="b-win" class="mod" data-mod="win">Win</button>
     <button id="b-kb">⌨ 键盘</button>
     <button id="b-cad" class="warn">CtrlAltDel</button>
+    <button id="b-unstick" class="warn">解锁键盘</button>
   </div>
 </div>  <div id="kbpanel">
   <div id="kbline">
@@ -303,6 +320,12 @@
         <button data-v="0.6">标准</button>
         <button data-v="1">清晰</button>
         <button data-v="1.5">超清</button>
+      </span></div>
+    <div class="set-row"><span>画面初始大小</span>
+      <span class="seg" id="set-fit">
+        <button data-v="contain" class="on">适应</button>
+        <button data-v="width">铺宽</button>
+        <button data-v="full">铺满</button>
       </span></div>
     <div class="set-row"><span>单手模式（工具栏贴底）</span>
       <button id="set-onehand" class="toggle">关</button></div>
@@ -379,12 +402,15 @@
   }
 
   /* ---------- 画质 ---------- */
-  function setQuality(q) {
-    if (q === quality) return;
-    quality = q;
+  function syncQualityUI(q) {
     document.querySelectorAll("#qseg button").forEach(function (b) {
       b.classList.toggle("on", b.dataset.q === q);
     });
+  }
+  function setQuality(q) {
+    if (q === quality) return;
+    quality = q;
+    syncQualityUI(q);
     send({ t: "setpreset", preset: q }); // 控制通道下发，电脑端本地换编码参数
     if (vmode === "mjpeg") screenEl.src = streamUrl(q);
     setTimeout(fetchInfo, 700);
@@ -423,9 +449,7 @@
         // 画质按钮与设备当前设置同步
         if (d.preset) {
           quality = d.preset;
-          document.querySelectorAll("#qseg button").forEach(function (b) {
-            b.classList.toggle("on", b.dataset.q === d.preset);
-          });
+          syncQualityUI(d.preset);
         }
         return true;
       }
@@ -443,6 +467,9 @@
     ws.onopen = function () {
       wsOk = true; dot.className = "dot ok";
       if (!relay) statusEl.textContent = "已连接";
+      // 重连后同步键盘状态：电脑端可能残留卡键（上次断线时正按着修饰键），先强制释放
+      send({ t: "releasekeys" });
+      resetLocalMods();
       if (typeof resScale !== "undefined" && resScale !== "auto") setRes(resScale); // 重连后恢复自定义分辨率
     };
     ws.onclose = function () {
@@ -453,7 +480,7 @@
     ws.onerror = function () { try { ws.close(); } catch (e) {} };
   }
 
-  /* ---------- 坐标换算 ---------- */
+  /* ---------- 坐标换算（铺宽/铺满/缩放下均按实际渲染矩形映射） ---------- */
   function clientToFrame(cx, cy) {
     var r = view.getBoundingClientRect();
     if (!r.width || !r.height) return { x: 0, y: 0 };
@@ -475,7 +502,6 @@
   var pinch = null;          // { dist, cx, cy, s, x, y } 捏合起始状态
   var panning = false;       // 缩放后的单指平移
   var panStart = null;       // { px, py, x, y }
-  var zoomTap = null;        // 双击复位检测
   var ZOOM_MIN = 1, ZOOM_MAX = 5;
   var zoombox = $("zoombox"), zoomhint = $("zoomhint");
 
@@ -635,6 +661,23 @@
   stage.addEventListener("pointercancel", endPointer);
   stage.addEventListener("contextmenu", function (e) { e.preventDefault(); });
 
+  /* ---------- 触摸自愈：指针状态卡死检测 ----------
+     浏览器偶发吞掉 pointercancel（切后台/滚动接管/通知横幅），残留的指针
+     会让后续触摸全部失灵（表现为"触屏失灵"）。真实触摸不可能 3 秒无事件，
+     超时即自动清空全部触摸状态，无需刷新页面。 */
+  var lastTouchTs = Date.now();
+  ["pointerdown", "pointermove", "pointerup", "pointercancel"].forEach(function (ev) {
+    stage.addEventListener(ev, function () { lastTouchTs = Date.now(); }, true);
+  });
+  setInterval(function () {
+    if (pointers.size > 0 && Date.now() - lastTouchTs > 3000) {
+      pointers.clear();
+      clearTimeout(pressTimer);
+      pinch = null; panning = false; panStart = null; lastCentroid = null;
+      multi = false; moved = false; lastSent = null;
+    }
+  }, 1000);
+
   /* ---------- 工具栏 ---------- */
   function clickAtFrame(button) {
     send({ t: "click", button: button, x: lastFrame.x, y: lastFrame.y, mods: activeMods() });
@@ -645,6 +688,10 @@
   $("b-wup").addEventListener("click", function () { send({ t: "scroll", dy: 3, dx: 0, mods: activeMods() }); });
   $("b-wdown").addEventListener("click", function () { send({ t: "scroll", dy: -3, dx: 0, mods: activeMods() }); });
 
+  function resetLocalMods() {
+    Object.keys(mods).forEach(function (k) { mods[k] = false; });
+    document.querySelectorAll(".mod").forEach(function (b) { b.classList.remove("on"); });
+  }
   document.querySelectorAll(".mod").forEach(function (b) {
     b.addEventListener("click", function () {
       var k = b.dataset.mod;
@@ -653,6 +700,15 @@
       if (mods[k]) send({ t: "keydown", key: modKey(k) });
       else send({ t: "keyup", key: modKey(k) });
     });
+  });
+
+  /* ---------- 解锁键盘：一键释放电脑端所有修饰键（操作"全部失灵"自救） ---------- */
+  $("b-unstick").addEventListener("click", function () {
+    resetLocalMods();
+    send({ t: "releasekeys" });
+    var prev = statusEl.textContent;
+    statusEl.textContent = "已释放 Ctrl/Alt/Shift/Win —— 再试一下点击";
+    setTimeout(function () { statusEl.textContent = prev; }, 2500);
   });
 
   $("b-doctor").addEventListener("click", function () {
@@ -842,9 +898,11 @@
       if (typeof s.sens === "number") sens = s.sens;
       if (typeof s.wheel === "number") wheelSpeed = s.wheel;
       if (s.res !== undefined) resScale = s.res;
+      if (s.fit !== undefined) fitMode = s.fit;
       if (s.onehand) document.body.classList.add("onehand");
       if (s.big) document.body.classList.add("big");
     } catch (e) {}
+    applyFit();
     syncPrefsUI();
   }
   function syncPrefsUI() {
@@ -863,15 +921,29 @@
     var big = document.body.classList.contains("big");
     $("set-big").classList.toggle("on", big);
     $("set-big").textContent = big ? "开" : "关";
+    document.querySelectorAll("#set-fit button").forEach(function (b) {
+      b.classList.toggle("on", b.dataset.v === fitMode);
+    });
   }
   function savePrefs() {
     try {
       localStorage.setItem("fr-prefs", JSON.stringify({
-        sens: sens, wheel: wheelSpeed, res: resScale,
+        sens: sens, wheel: wheelSpeed, res: resScale, fit: fitMode,
         onehand: document.body.classList.contains("onehand"),
         big: document.body.classList.contains("big")
       }));
     } catch (e) {}
+  }
+  /* 画面初始大小：适应(默认)/铺宽/铺满 —— 铺满后配合捏合缩放平移查看细节 */
+  var fitMode = "contain";
+  function applyFit() {
+    var zb = $("zoombox");
+    zb.classList.remove("fit-width", "fit-full");
+    if (fitMode === "width") zb.classList.add("fit-width");
+    else if (fitMode === "full") zb.classList.add("fit-full");
+    // 画面尺寸变化后重置视图变换并通知画布重算
+    resetZoom();
+    if (vmode === "blocks") fitCanvas();
   }
   /* 画面分辨率：改变推流帧的像素尺寸（服务器 setres 指令） */
   var resScale = "auto";
@@ -885,19 +957,15 @@
     $("setpanel").hidden = !$("setpanel").hidden;
   });
   $("set-close").addEventListener("click", function () { $("setpanel").hidden = true; });
-  document.querySelectorAll("#set-sens button").forEach(function (b) {
-    b.addEventListener("click", function () {
-      sens = parseFloat(b.dataset.v); syncPrefsUI(); savePrefs();
-    });
-  });
-  document.querySelectorAll("#set-wheel button").forEach(function (b) {
-    b.addEventListener("click", function () {
-      wheelSpeed = parseFloat(b.dataset.v); syncPrefsUI(); savePrefs();
-    });
-  });
-  document.querySelectorAll("#set-res button").forEach(function (b) {
-    b.addEventListener("click", function () {
-      setRes(b.dataset.v); syncPrefsUI(); savePrefs();
+  // 设置面板分段按钮统一绑定：sens/wheel 直接存值，res/fit 走各自 apply 函数
+  [["#set-sens", function (v) { sens = parseFloat(v); }],
+   ["#set-wheel", function (v) { wheelSpeed = parseFloat(v); }],
+   ["#set-res", function (v) { setRes(v); }],
+   ["#set-fit", function (v) { fitMode = v; applyFit(); }]].forEach(function (pair) {
+    document.querySelectorAll(pair[0] + " button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        pair[1](b.dataset.v); syncPrefsUI(); savePrefs();
+      });
     });
   });
   $("set-onehand").addEventListener("click", function () {
@@ -907,12 +975,78 @@
   $("set-big").addEventListener("click", function () {
     document.body.classList.toggle("big");
     syncPrefsUI(); savePrefs();
+    if (document.body.classList.contains("big")) setTimeout(barRestore, 0); // 恢复上次停靠位置
   });
   $("big-exit").addEventListener("click", function () {
     document.body.classList.remove("big");
     syncPrefsUI(); savePrefs();
   });
+
+  /* ---------- 大屏模式：悬浮控制条可拖拽（按住拖动，轻点仍是按键） ---------- */
+  var bar = $("toolbar"), barDrag = null, barDragged = false, barPointer = null;
+  function barSaved() {
+    try { return JSON.parse(localStorage.getItem("fr-prefs") || "{}").barPos || null; }
+    catch (e) { return null; }
+  }
+  function barSavePos(x, y) {
+    try {
+      var p = JSON.parse(localStorage.getItem("fr-prefs") || "{}");
+      p.barPos = { x: Math.round(x), y: Math.round(y) };
+      localStorage.setItem("fr-prefs", JSON.stringify(p));
+    } catch (e) {}
+  }
+  function barClamp(x, y) {
+    return {
+      x: Math.max(6, Math.min(window.innerWidth - bar.offsetWidth - 6, x)),
+      y: Math.max(6, Math.min(window.innerHeight - bar.offsetHeight - 6, y))
+    };
+  }
+  function barPlace(x, y, save) {
+    var c = barClamp(x, y);
+    bar.style.left = c.x + "px"; bar.style.top = c.y + "px";
+    bar.style.right = "auto"; bar.style.bottom = "auto";
+    if (save) barSavePos(c.x, c.y);
+  }
+  function barRestore() {
+    if (!document.body.classList.contains("big")) return;
+    var p = barSaved();
+    if (p) barPlace(p.x, p.y, false);
+  }
+  bar.addEventListener("pointerdown", function (e) {
+    if (!document.body.classList.contains("big") || barPointer !== null) return;
+    barPointer = e.pointerId;
+    barDrag = { px: e.clientX, py: e.clientY, x: bar.offsetLeft, y: bar.offsetTop };
+    barDragged = false;
+  });
+  bar.addEventListener("pointermove", function (e) {
+    if (barPointer !== e.pointerId || !barDrag) return;
+    var dx = e.clientX - barDrag.px, dy = e.clientY - barDrag.py;
+    if (!barDragged && Math.abs(dx) + Math.abs(dy) < 8) return; // 小于阈值不算拖拽
+    barDragged = true;
+    barPlace(barDrag.x + dx, barDrag.y + dy, false);
+  });
+  function barDragEnd(e) {
+    if (barPointer !== e.pointerId) return;
+    barPointer = null;
+    if (barDragged) {
+      barPlace(bar.offsetLeft, bar.offsetTop, true); // 松手时保存位置
+      setTimeout(function () { barDragged = false; }, 0); // click 抑制后复位
+    }
+    barDrag = null;
+  }
+  bar.addEventListener("pointerup", barDragEnd);
+  bar.addEventListener("pointercancel", barDragEnd);
+  bar.addEventListener("click", function (e) {
+    if (barDragged) {
+      e.stopPropagation(); e.preventDefault();
+      barDragged = false; // 同步复位，连续两次拖拽也可靠
+    }
+  }, true);
+  window.addEventListener("resize", function () {
+    if (document.body.classList.contains("big") && bar.style.left) barPlace(bar.offsetLeft, bar.offsetTop, true);
+  });
   loadPrefs();
+  if (document.body.classList.contains("big")) setTimeout(barRestore, 0); // 开机直接进大屏时恢复停靠位
 
   /* ---------- 虚拟键盘 ---------- */
   var specialKeys = [
@@ -1062,6 +1196,43 @@
       }).catch(function () { imgFallback(blob, x, y); });
     } else imgFallback(blob, x, y);
   }
+
+  /* ---------- 分块绘制合批：一条消息里的多个块在同一帧内统一提交 ----------
+     之前每块独立 createImageBitmap+drawImage：动画区域常覆盖多块，一次 rAF 内
+     同一块可能被反复解码重绘。合批后：同位置只画最后一块（覆盖关系不变），
+     整批一次 rAF 提交，GPU 合成次数显著下降，弱机不再掉帧。 */
+  var drawQueue = [], drawScheduled = false;
+  function queueJpeg(jpeg, x, y) {
+    drawQueue.push({ d: jpeg, x: x, y: y });
+    if (!drawScheduled) {
+      drawScheduled = true;
+      requestAnimationFrame(flushDraws);
+    }
+  }
+  function flushDraws() {
+    drawScheduled = false;
+    var q = drawQueue; drawQueue = [];
+    if (!q.length) return;
+    var kept = [];
+    for (var i = 0; i < q.length; i++) {
+      var it = q[i], dup = -1;
+      for (var j = 0; j < kept.length; j++) {
+        if (kept[j].x === it.x && kept[j].y === it.y) { dup = j; break; }
+      }
+      if (dup >= 0) kept[dup] = it; else kept.push(it);
+    }
+    var pending = kept.length;
+    for (var k = 0; k < kept.length; k++) {
+      (function (item) {
+        var blob = new Blob([item.d], { type: "image/jpeg" });
+        if (window.createImageBitmap) {
+          createImageBitmap(blob).then(function (bmp) {
+            vctx.drawImage(bmp, item.x, item.y);
+          }).catch(function () { imgFallback(blob, item.x, item.y); });
+        } else imgFallback(blob, item.x, item.y);
+      })(kept[k]);
+    }
+  }
   function imgFallback(blob, x, y) {
     var url = URL.createObjectURL(blob);
     var im = new Image();
@@ -1113,7 +1284,7 @@
         var l = (data[p + 2] << 8) | data[p + 3];
         if (vframe.cols) {
           var col = idx % vframe.cols, row = Math.floor(idx / vframe.cols);
-          drawJpeg(data.subarray(p + 4, p + 4 + l), col * vframe.block, row * vframe.block);
+          queueJpeg(data.subarray(p + 4, p + 4 + l), col * vframe.block, row * vframe.block);
         }
         p += 4 + l;
       }
@@ -1190,7 +1361,10 @@
   function requestWakeLock() {
     if (navigator.wakeLock && !wakeLock) {
       navigator.wakeLock.request("screen")
-        .then(function (wl) { wakeLock = wl; })
+        .then(function (wl) {
+          wakeLock = wl;
+          wl.addEventListener("release", function () { wakeLock = null; }); // 释放后允许重新申请
+        })
         .catch(function () { /* 不支持时静默 */ });
     }
   }

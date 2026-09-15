@@ -23,6 +23,7 @@ import struct
 import subprocess
 import sys
 import time
+import zlib
 from pathlib import Path
 from urllib.parse import quote
 
@@ -172,6 +173,12 @@ class HealthMonitor:
         self.last_frame_t = None
         self.degraded = False
         self.remedies = []  # [{at, action}] 自动补救记录
+        # GIL 卡顿检测：采集耗时异常的样本（dt 超过目标周期 2.5 倍）
+        self.slow_notes: list[float] = []
+        self._gil_warned_at = 0.0
+        self.capture_pauses = 0
+        self.paused_until = 0.0
+        self._expected_dt = 1.0 / max(target_fps, 1) * 2.5
 
     # ---- 采集统计 ----
     def note_ok(self):
@@ -180,6 +187,10 @@ class HealthMonitor:
             dt = now - self.last_frame_t
             inst = 1.0 / dt if dt > 0 else 0.0
             self.fps_ema = self.fps_ema * 0.8 + inst * 0.2 if self.fps_ema else inst
+            if dt > self._expected_dt:  # 本帧采集耗时异常（GIL 被占用的典型信号）
+                self.slow_notes.append(now)
+                cutoff = now - 4.0
+                self.slow_notes = [t for t in self.slow_notes if t > cutoff]
         self.last_frame_t = now
         self.capture_ok += 1
         self.consecutive_fail = 0
@@ -191,6 +202,27 @@ class HealthMonitor:
 
     def note_reconnect(self):
         self.reconnects += 1
+
+    # ---- GIL 争用自保（minimize 重型应用 / 编译 / 压缩时） ----
+    def check_gil_pause(self, streamer):
+        """无观看者且 GIL 持续卡顿 → 暂停采集 5 秒，把 CPU 让给前台应用。"""
+        now = time.monotonic()
+        if now < self.paused_until:
+            return True  # 暂停中
+        if len(self.slow_notes) >= 3 and (streamer is None or not self._has_viewers(streamer)):
+            self.paused_until = now + 5.0
+            self.capture_pauses += 1
+            self.slow_notes = []
+            if now - self._gil_warned_at > 30:
+                self._gil_warned_at = now
+                self.add_remedy("检测到系统繁忙且无观看者，暂停屏幕采集 5 秒让出 CPU")
+            return True
+        return False
+
+    def _has_viewers(self, streamer) -> bool:
+        fs = getattr(streamer, "_owner_fs", None)
+        bc = getattr(streamer, "_owner_bc", None)
+        return bool((fs and fs.subs) or (bc and bc.subs))
 
     def add_remedy(self, action: str):
         self.remedies.append({"at": time.strftime("%H:%M:%S"), "action": action})
@@ -490,6 +522,10 @@ class Broadcaster:
         while True:
             t0 = self._loop.time()
             try:
+                # 系统繁忙且无观看者时暂停采集，把 CPU 让给前台应用
+                if self.streamer.health and self.streamer.health.check_gil_pause(self.streamer):
+                    await _pace(self._loop, 1.0, t0)
+                    continue
                 data = await self._loop.run_in_executor(None, self.streamer.capture)
                 if data:
                     if self.streamer.health:
@@ -547,6 +583,10 @@ class FrameSource:
         while True:
             t0 = self.loop.time()
             try:
+                # 系统繁忙且无观看者时暂停采集，把 CPU 让给前台应用
+                if self.streamer.health and self.streamer.health.check_gil_pause(self.streamer):
+                    await _pace(self.loop, 1.0, t0)
+                    continue
                 rgb, w, h = await self.loop.run_in_executor(None, self.streamer.capture_rgb)
                 if rgb:
                     for q in list(self.subs):
@@ -577,6 +617,7 @@ class BlockEncoder:
     def __init__(self, streamer: Streamer):
         self.streamer = streamer
         self.prev = {}
+        self.crcs = {}  # idx -> 上次发送的块 CRC（压缩结果等价即跳过）
         self.prev_w = 0
         self.prev_h = 0
         self.last_cursor = None
@@ -591,14 +632,19 @@ class BlockEncoder:
         y0, y1 = row * self.BLOCK, min(row * self.BLOCK + self.BLOCK, h)
         x0, x1 = col * self.BLOCK, min(col * self.BLOCK + self.BLOCK, w)
         stride = w * 3
+        if x1 - x0 == w:  # 整行连续内存 → 一次切片，不再逐行 join
+            return rgb[y0 * stride: y1 * stride]
         return b"".join(rgb[y * stride + x0 * 3: y * stride + x1 * 3] for y in range(y0, y1))
 
     def snapshot(self, rgb, w, h):
         cols, rows = self.grid(w, h)
         self.prev = {}
+        self.crcs = {}
         for row in range(rows):
             for col in range(cols):
-                self.prev[row * cols + col] = self.block_bytes(rgb, w, h, row, col)
+                b = self.block_bytes(rgb, w, h, row, col)
+                self.prev[row * cols + col] = b
+                self.crcs[row * cols + col] = zlib.crc32(b)
         self.prev_w, self.prev_h = w, h
 
     def encode_full(self, rgb, w, h, cx, cy) -> bytes:
@@ -614,8 +660,13 @@ class BlockEncoder:
     def encode_block(self, rgb, w, h, row, col) -> bytes:
         y0, y1 = row * self.BLOCK, min(row * self.BLOCK + self.BLOCK, h)
         x0, x1 = col * self.BLOCK, min(col * self.BLOCK + self.BLOCK, w)
-        b = self.block_bytes(rgb, w, h, row, col)
-        pil = Image.frombytes("RGB", (x1 - x0, y1 - y0), b)
+        return self.encode_block_bytes(self.block_bytes(rgb, w, h, row, col), row, col)
+
+    def encode_block_bytes(self, block: bytes, row, col) -> bytes:
+        """把已切好的块字节编码为 JPEG（diff 路径复用，避免二次切片）。"""
+        y1 = min(row * self.BLOCK + self.BLOCK, self.prev_h)
+        x1 = min(col * self.BLOCK + self.BLOCK, self.prev_w)
+        pil = Image.frombytes("RGB", (x1 - col * self.BLOCK, y1 - row * self.BLOCK), block)
         buf = io.BytesIO()
         pil.save(buf, "JPEG", quality=self.streamer.quality)
         return buf.getvalue()
@@ -627,12 +678,13 @@ class BlockEncoder:
             return [self.encode_full(rgb, w, h, cx, cy)]
         cols, rows = self.grid(w, h)
         changed = []
+        prev = self.prev
         for row in range(rows):
             for col in range(cols):
                 idx = row * cols + col
                 b = self.block_bytes(rgb, w, h, row, col)
-                if self.prev.get(idx) != b:
-                    self.prev[idx] = b
+                if prev.get(idx) != b:
+                    prev[idx] = b
                     changed.append(idx)
         total = cols * rows
         if not changed:
@@ -643,13 +695,23 @@ class BlockEncoder:
         if len(changed) > total * self.full_threshold:
             self.snapshot(rgb, w, h)
             return [self.encode_full(rgb, w, h, cx, cy)]
-        payload = bytearray(b"\x02" + struct.pack(">H", len(changed)))
+        payload = bytearray(b"\x02\x00\x00")  # 块数占位，编码后回填真实数量
+        sent = 0
         for idx in changed:
             row, col = divmod(idx, cols)
-            jpeg = self.encode_block(rgb, w, h, row, col)
+            b = prev[idx]  # diff 循环已算好块字节，直接复用
+            if zlib.crc32(b) == self.crcs.get(idx):  # 压缩等价但字节不同的块跳过
+                continue
+            self.crcs[idx] = zlib.crc32(b)
+            jpeg = self.encode_block_bytes(b, row, col)
             payload += struct.pack(">HH", idx, len(jpeg)) + jpeg
-        payload += struct.pack(">HH", cx, cy)
+            sent += 1
         self.last_cursor = (cx, cy)
+        if not sent:
+            # 全部块都是压缩等价抖动 → 只发 6 字节光标消息（协议：块数为 0 不合法）
+            return [b"\x04" + struct.pack(">HH", cx, cy)]
+        struct.pack_into(">H", payload, 1, sent)
+        payload += struct.pack(">HH", cx, cy)
         return [bytes(payload)]
 
 
@@ -684,6 +746,25 @@ def _with_mods(mods, fn):
     finally:
         for k in reversed(mods):
             pyautogui.keyUp(k)
+
+
+_MOD_KEYS = ("ctrl", "alt", "shift", "win")
+
+
+def force_release_all_mods(reason: str = ""):
+    """强制释放所有修饰键，防"卡键"。
+
+    场景：手机断线/息屏时 Ctrl 或 Win 正被按住 -> 电脑端键位卡死，
+    之后手机的一切点击都变成 Ctrl+点击/Win+点击，表现为"全部失灵"。
+    在控制连接断开时调用（websocket 心跳 30s 内必发现断线）。
+    """
+    for k in _MOD_KEYS:
+        try:
+            pyautogui.keyUp(k)
+        except Exception:
+            pass
+    if reason:
+        log("INFO", f"已强制释放修饰键（{reason}），防卡键")
 
 
 def apply_command(streamer: Streamer, cmd: dict):
@@ -745,10 +826,13 @@ def apply_command(streamer: Streamer, cmd: dict):
                     pyperclip.copy(text)
                     pyautogui.hotkey(*_paste_keys())
 
+        elif t == "releasekeys":
+            # 手机端"解锁键盘"：修饰键疑似卡住时一键恢复（页面失灵自救）
+            force_release_all_mods("手机端请求")
+
         elif t == "setpreset":
             # 手机端切换画质（中继模式下由电脑端本地编码）
             streamer.set_preset(cmd.get("preset", "mid"))
-
         elif t == "setres":
             # 手机端自定义推流分辨率（"auto"=恢复跟随画质档位）
             v = cmd.get("scale", None)
@@ -1092,6 +1176,9 @@ async def _vstream_loop(ws_v, streamer, monitor, loop):
     enc = BlockEncoder(streamer)
     while True:
         t0 = loop.time()
+        if monitor.check_gil_pause(streamer):
+            await _pace(loop, 1.0, t0)
+            continue
         rgb, w, h = await loop.run_in_executor(None, streamer.capture_rgb)
         if rgb:
             monitor.maybe_heal(streamer)
@@ -1110,19 +1197,10 @@ async def _command_loop(ws, streamer, loop):
                 cmd = json.loads(msg.data)
             except json.JSONDecodeError:
                 continue
-            if cmd.get("t") == "setpreset":
-                streamer.set_preset(cmd.get("preset", "mid"))
+            # 统一入口：所有指令都交给 apply_command；画质/分辨率变化额外回报设备信息
+            await loop.run_in_executor(None, apply_command, streamer, cmd)
+            if cmd.get("t") in ("setpreset", "setres"):
                 await send_device_info(ws, streamer)
-            elif cmd.get("t") == "setres":
-                # 手机端自定义推流分辨率（"auto"=恢复跟随画质档位）
-                v = cmd.get("scale", None)
-                if v in (None, "auto", ""):
-                    streamer.set_resolution(None)
-                else:
-                    streamer.set_resolution(float(v))
-                await send_device_info(ws, streamer)
-            else:
-                await loop.run_in_executor(None, apply_command, streamer, cmd)
         elif msg.type == WSMsgType.ERROR:
             break
 
@@ -1138,6 +1216,9 @@ async def _capture_loop(ws, streamer, monitor, loop):
     """中继上行：屏幕帧推流。"""
     while True:
         t0 = loop.time()
+        if monitor.check_gil_pause(streamer):
+            await _pace(loop, 1.0, t0)
+            continue
         data = await loop.run_in_executor(None, streamer.capture)
         monitor.maybe_heal(streamer)  # 自愈
         await ws.send_bytes(data)
@@ -1527,15 +1608,19 @@ async def ws_handler(request):
     await ws.prepare(request)
     audit(request.app, "控制连接建立", client_ip(request))
     loop = asyncio.get_running_loop()
-    async for msg in ws:
-        if msg.type == WSMsgType.TEXT:
-            try:
-                cmd = json.loads(msg.data)
-            except json.JSONDecodeError:
-                continue
-            await loop.run_in_executor(None, apply_command, streamer, cmd)
-        elif msg.type == WSMsgType.ERROR:
-            break
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                try:
+                    cmd = json.loads(msg.data)
+                except json.JSONDecodeError:
+                    continue
+                await loop.run_in_executor(None, apply_command, streamer, cmd)
+            elif msg.type == WSMsgType.ERROR:
+                break
+    finally:
+        # 断线（手机锁屏/切后台/网络切换）时强制释放修饰键，防止电脑端卡键
+        await loop.run_in_executor(None, force_release_all_mods, "控制连接断开")
     audit(request.app, "控制连接断开", client_ip(request))
     return ws
 
@@ -1549,6 +1634,9 @@ def make_app(args) -> web.Application:
     streamer = Streamer(args.monitor, args.preset, args.fps, monitor)
     broadcaster = Broadcaster(streamer)
     frames = FrameSource(streamer)
+    # 让健康监控知道谁在观看（无观看者时才启用"繁忙暂停采集"自保）
+    streamer._owner_fs = frames
+    streamer._owner_bc = broadcaster
     app = web.Application()
     app["args"] = args
     app["streamer"] = streamer

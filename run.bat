@@ -57,6 +57,7 @@ echo.
 echo 未检测到中继配置（relay-config.txt）。
 echo   - 直接回车  = 局域网模式（手机连同一 WiFi）
 echo   - 输入 O     = 局域网模式 + 一次性口令（10 分钟时效，用完作废）
+echo   - 需控制任务管理器/管理员程序 -> 关闭本窗口，改用 run-admin.bat
 set /p CHOICE=选择启动方式（回车=局域网 / O=一次性口令 / Y=配置中继）：
 if /i "%CHOICE%"=="Y" goto :configure_relay
 if /i "%CHOICE%"=="O" set RUN_ARGS=--once

@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-WATCH_FILES = ["server.py", "relay.py", "token.txt"]
+WATCH_FILES = ["server.py", "relay.py", "token.txt", "web/index.html"]
 RESTART_DELAY = 2.0          # 崩溃后等待秒数
 POLL_INTERVAL = 2.0          # 文件变化轮询间隔
 FAST_FAIL_LIMIT = 5          # 连续快速崩溃次数上限（防止死循环拉起）
@@ -63,7 +63,7 @@ def spawn(child_args) -> subprocess.Popen:
 def main() -> int:
     child_args = sys.argv[1:]
     say(f"看门狗启动（目录 {BASE_DIR}）")
-    say("功能：崩溃自动重启 + 文件热更新（server.py / relay.py / token.txt 改动即生效）")
+    say("功能：崩溃自动重启 + 文件热更新（server.py / relay.py / token.txt / 前端页面 改动即生效）")
     say("停止：按 Ctrl+C（会同时停止 FreeRemote 服务）")
 
     mtimes = snapshot_mtimes()
@@ -118,9 +118,13 @@ def main() -> int:
         if ran < FAST_FAIL_WINDOW:
             fast_fails += 1
             if fast_fails >= FAST_FAIL_LIMIT:
-                say(f"服务连续 {fast_fails} 次启动后立刻退出（exit {code}），"
-                    f"停止拉起。请检查配置或查看 logs/server.log")
-                return 2
+                # 不再永久放弃：退避后重置计数继续尝试（端口释放/依赖恢复后自愈）
+                backoff = min(60.0, RESTART_DELAY * (2 ** FAST_FAIL_LIMIT))
+                say(f"服务连续 {fast_fails} 次快速退出（exit {code}），"
+                    f"{backoff:.0f} 秒后继续尝试（端口未释放/配置问题会自动恢复）")
+                fast_fails = 0
+                time.sleep(backoff)
+                continue
             say(f"服务异常退出（exit {code}，运行 {ran:.1f}s），"
                 f"{RESTART_DELAY:.0f} 秒后自动重启（{fast_fails}/{FAST_FAIL_LIMIT}）…")
         else:
