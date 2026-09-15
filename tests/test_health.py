@@ -2,10 +2,8 @@
 """健康监控策略锁：以 maybe_heal（唯一策略入口）的真实行为为准。
 
 用桩 streamer 记录 reinit/probe/set_preset 调用，锁定：
-  连续 2 次失败触发重建、3 秒防抖、探针通过清零、探针失败静默重试、降档逻辑。
+  连续 2 次失败触发重建、3 秒防抖、探针通过清零、探针失败静默重试。
 """
-import pytest
-
 from free_remote.health import HealthMonitor
 
 

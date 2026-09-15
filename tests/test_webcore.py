@@ -4,7 +4,7 @@ import time
 
 from free_remote import webcore
 from free_remote.webcore import (
-    RateLimiter, ip_allowed, new_session, session_ok, set_session_cookie,
+    RateLimiter, ip_allowed, new_session, session_ok,
 )
 
 

@@ -21,6 +21,8 @@ def test_absolute_path_kept(tmp_path):
 
 
 def test_safe_file_name_blocks_traversal():
-    assert safe_file_name("..\evil") not in ("..\evil",)
-    assert "/" not in safe_file_name("a/b") and "\\" not in safe_file_name("a/b")
+    bs = chr(92)  # 反斜杠，避免源码里的转义序列歧义
+    assert safe_file_name(".." + bs + "evil") != ".." + bs + "evil"  # 穿越串被改写
+    cleaned = safe_file_name("a/b")
+    assert "/" not in cleaned and bs not in cleaned
     assert safe_file_name("ok-name.txt") == "ok-name.txt"

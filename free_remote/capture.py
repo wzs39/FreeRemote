@@ -316,8 +316,6 @@ class BlockEncoder:
                 + jpeg + struct.pack(">HH", cx, cy))
 
     def encode_block(self, rgb, w, h, row, col) -> bytes:
-        y0, y1 = row * self.BLOCK, min(row * self.BLOCK + self.BLOCK, h)
-        x0, x1 = col * self.BLOCK, min(col * self.BLOCK + self.BLOCK, w)
         return self.encode_block_bytes(self.block_bytes(rgb, w, h, row, col), row, col)
 
     def encode_block_bytes(self, block: bytes, row, col) -> bytes:

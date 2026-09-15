@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    # Windows 运行器：与真实部署环境一致，47 项测试全部执行
+    # （win_input 修饰键用例在非 Windows 下会跳过）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: 静态检查（pyflakes 零告警）
+        run: |
+          python -m pyflakes free_remote/ server.py tests/
+
+      - name: 测试（47 项行为锁）
+        run: |
+          python -m pytest tests/ -q --tb=short
