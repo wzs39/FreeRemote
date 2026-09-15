@@ -99,6 +99,9 @@
     background: rgba(20,23,31,.88); color: #bcd0ff; font-size: 12px; padding: 6px 12px;
     border-radius: 14px; pointer-events: none; opacity: 0; transition: opacity .3s; }
   #zoomhint.show { opacity: 1; }
+  #frozen { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 46;
+    background: rgba(120,40,20,.92); color: #ffe3d2; font-size: 12px; padding: 6px 12px;
+    border-radius: 14px; pointer-events: none; max-width: 86vw; }
   /* 画面初始大小模式：铺宽/铺满时允许画面溢出容器（配合平移查看） */
   #zoombox.fit-width #screen { max-width: none; max-height: 100%; width: 100vw; object-fit: fill; }
   #zoombox.fit-width #vwrap { width: 100vw; }
@@ -244,6 +247,7 @@
     </div>
   </div>
 </div>
+<div id="frozen" hidden>⚠ 画面已停止更新 —— 电脑端可能在锁屏/系统繁忙，链路正常，恢复后自动消失</div>
 <div id="zoomhint" hidden>已放大 · 双击空白处复位</div>
 
 <div id="side">
@@ -1296,18 +1300,43 @@
     }
   }
 
+  var vLastMsg = 0, freezeTimer = null, vSignal = false;  // 冻结检测 + 首信号标记
+  var vLastFrame = 0;  // 最后一次收到真实画面帧（区分"链路死"与"采集卡住"）
+
   function openVStream() {
     if (!window.WebSocket) { startMjpeg(); return; }
     try { vws = new WebSocket(wsUrl("/vstream")); }
     catch (e) { startMjpeg(); return; }
     vws.binaryType = "arraybuffer";
+    vSignal = false;
     vws.onmessage = function (e) {
+      vLastMsg = Date.now();          // 任何消息都算"流还活着"（含心跳）
+      vSignal = true;
       if (typeof e.data === "string") {
         try { vText(JSON.parse(e.data)); } catch (err) {}
       } else {
         vBinary(new Uint8Array(e.data));
+        vLastFrame = Date.now();      // 二进制消息 = 真实画面数据到达
       }
     };
+    vLastMsg = Date.now();
+    if (!freezeTimer) {
+      freezeTimer = setInterval(function () {
+        var now = Date.now();
+        // 检测A：12 秒无任何消息（心跳 5 秒一次）= 传输死 → 断开由 onclose 重连
+        if (vmode === "blocks" && vws && now - vLastMsg > 12000) {
+          try { vws.close(); } catch (err) {}
+          return;
+        }
+        // 检测B：链路活着（心跳在跳）但 30 秒无画面帧 = 采集卡住（锁屏/驱动挂起）
+        // → 重连无法解决，显示提示条，采集恢复后自动消失
+        var frozen = $("frozen");
+        if (frozen) {
+          var bad = vmode === "blocks" && vws && vLastFrame && now - vLastFrame > 30000;
+          frozen.hidden = !bad;
+        }
+      }, 3000);
+    }
     vws.onclose = function () {
       var wasBlocks = vmode === "blocks";
       vws = null;
@@ -1320,10 +1349,12 @@
     if (vmode === "blocks") return;
     if (relay && lastOnline === false) return; // 设备离线，等上线再连
     vmode = "none";
+    vSignal = false;
     openVStream();
     setTimeout(function () {
-      // 3 秒没收到任何帧 → 降级为 MJPEG
-      if (vmode === "none") {
+      // 3 秒没收到任何帧/活信号 → 降级 MJPEG（心跳/init 文本也算活信号，
+      // 静止桌面上分块流健康但无画面变化，不能误降级）
+      if (vmode === "none" && !vSignal) {
         try { vws.close(); } catch (e) {}
         startMjpeg();
       }
@@ -1369,7 +1400,13 @@
     }
   }
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden) requestWakeLock();
+    if (!document.hidden) {
+      requestWakeLock();
+      // 切回前台：若画面已冻结超阈值，立即触发检测（不等下一个 3 秒 tick）
+      if (vmode === "blocks" && vws && Date.now() - vLastMsg > 12000) {
+        try { vws.close(); } catch (err) {}
+      }
+    }
   });
 
   /* ---------- 启动：先探测运行模式 → 鉴权 → 连接 ---------- */

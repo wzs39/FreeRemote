@@ -18,3 +18,7 @@ lucky/
 
 # 会话/预览内部目录（含口令备份与临时输出，勿提交）
 .freebuff/
+__pycache__/
+free_remote/__pycache__/
+free_remote/logs/
+free_remote/token.txt

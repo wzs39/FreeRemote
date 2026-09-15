@@ -1,5 +1,6 @@
 aiohttp>=3.10
 mss>=9.0
+numpy>=1.26
 Pillow>=10.4
 pyautogui>=0.9.54
 pyperclip>=1.9

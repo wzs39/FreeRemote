@@ -24,7 +24,11 @@ import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-WATCH_FILES = ["server.py", "relay.py", "token.txt", "web/index.html"]
+WATCH_FILES = ["server.py", "token.txt", "web/index.html",
+               "free_remote/config.py", "free_remote/capture.py", "free_remote/command.py",
+               "free_remote/web.py", "free_remote/webcore.py", "free_remote/relay.py",
+               "free_remote/fileshare.py", "free_remote/health.py", "free_remote/netinfo.py",
+               "free_remote/tokens.py", "free_remote/win_input.py", "free_remote/logging_util.py"]
 RESTART_DELAY = 2.0          # 崩溃后等待秒数
 POLL_INTERVAL = 2.0          # 文件变化轮询间隔
 FAST_FAIL_LIMIT = 5          # 连续快速崩溃次数上限（防止死循环拉起）
