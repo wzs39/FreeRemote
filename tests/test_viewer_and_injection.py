@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """结构债行为锁：观看者所有权唯一化 + 注入基础设施层。"""
-import sys
-
-sys.path.insert(0, r"E:\111\4")
+from pathlib import Path
 
 from free_remote import injection
 from free_remote.capture import Broadcaster, FrameSource, Streamer
 from free_remote.health import HealthMonitor
+
+ROOT = Path(__file__).resolve().parent.parent  # 仓库根（CI 与本地 checkout 通用）
 
 
 class FakeMSS:
@@ -69,8 +69,8 @@ def test_health_gil_pause_uses_public_api(monkeypatch):
 
 def test_injection_layer_is_the_single_engine_owner():
     """引擎选择只发生在 injection.py；capture/command 都只引 INJ。"""
-    src_cap = open(r"E:\111\4\free_remote\capture.py", encoding="utf-8").read()
-    src_cmd = open(r"E:\111\4\free_remote\command.py", encoding="utf-8").read()
+    src_cap = (ROOT / "free_remote" / "capture.py").read_text(encoding="utf-8")
+    src_cmd = (ROOT / "free_remote" / "command.py").read_text(encoding="utf-8")
     assert "from .command import" not in src_cap  # capture 不反向依赖 command
     assert "import pyautogui" not in src_cap      # capture 不自己选引擎
     assert "import pyautogui" not in src_cmd      # command 不自己选引擎
@@ -82,4 +82,4 @@ def test_injection_layer_is_the_single_engine_owner():
 def test_command_module_no_runtime_stub():
     """Streamer=None 运行时桩已移除（TYPE_CHECKING 替代）。"""
     import free_remote.command as C
-    assert "Streamer = None" not in open(C.__file__, encoding="utf-8").read()
+    assert "Streamer = None" not in Path(C.__file__).read_text(encoding="utf-8")
