@@ -18,13 +18,19 @@ __all__ = ["apply_command", "force_release_all_mods", "_INJ"]
 
 
 def _with_mods(mods, fn):
-    """按住修饰键执行动作（如 Ctrl+点击）。"""
-    for k in mods:
-        _INJ.keyDown(k)
+    """按住修饰键执行动作（如 Ctrl+点击）。
+
+    只回滚已成功按下的键：若第 k 个键名未知抛出，前 k-1 个仍会在
+    finally 里释放，不会滞留为卡键。
+    """
+    pressed = []
     try:
+        for k in mods:
+            _INJ.keyDown(k)
+            pressed.append(k)
         fn()
     finally:
-        for k in reversed(mods):
+        for k in reversed(pressed):
             _INJ.keyUp(k)
 
 
@@ -50,7 +56,13 @@ def apply_command(streamer: "Streamer", cmd: dict):
         elif t == "click":
             x, y = streamer.frame_to_screen(cmd["x"], cmd["y"])
             button = cmd.get("button", "left")
-            clicks = cmd.get("count", 1)
+            if button not in ("left", "right", "middle"):
+                log("WARN", f"未知鼠标按钮 {button!r}，按 left 处理")
+                button = "left"
+            try:
+                clicks = max(1, min(3, int(cmd.get("count", 1))))
+            except (TypeError, ValueError):
+                clicks = 1
             _with_mods(mods, lambda: _INJ.click(x, y, button=button, clicks=clicks))
 
         elif t == "scroll":

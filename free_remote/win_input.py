@@ -130,7 +130,10 @@ if available:
     }
 
     def click(x, y, button="left", clicks=1):
-        flags = _BTN_FLAGS.get(button, _BTN_FLAGS["left"])
+        # 严格契约：非法按钮在调度层（command.py）归一化为 left，引擎只接受三键
+        if button not in _BTN_FLAGS:
+            raise ValueError(f"未知鼠标按钮：{button}")
+        flags = _BTN_FLAGS[button]
         for _ in range(max(1, int(clicks))):
             move_to(x, y)
             for flag in flags:

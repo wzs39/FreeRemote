@@ -17,7 +17,6 @@
 约定：server.py 以退出码 3 结束时看门狗不重启（用于明确的"要求退出"）。
 """
 
-import os
 import subprocess
 import sys
 import time

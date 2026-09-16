@@ -25,7 +25,6 @@ def test_middle_button_flags():
 
 def test_wheel_flags_untouched():
     # 滚轮独立于按钮标志：WHEEL=0x0800 HWHEEL=0x1000（若改 click 表不波及 scroll）
-    import ctypes
     assert 0x0800 not in sum(win_input._BTN_FLAGS.values(), ())
     assert 0x1000 not in sum(win_input._BTN_FLAGS.values(), ())
 
