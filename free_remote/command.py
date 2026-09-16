@@ -1,15 +1,11 @@
 # -*- coding: utf-8 -*-
 """控制指令：手机指令 -> 系统输入注入（Windows 走 SendInput，其余 pyautogui）。"""
 import sys
-from typing import TYPE_CHECKING
 
 import pyperclip
 
 from .injection import INJ, force_release_all_mods
 from .logging_util import log
-
-if TYPE_CHECKING:  # 仅类型检查用，运行时零依赖（避免 capture<-command 环）
-    from .capture import Streamer
 
 # 统一注入门面（injection.py 是基础设施层，capture 同样只依赖它）
 _INJ = INJ
@@ -44,17 +40,49 @@ def _paste_keys():
     return ["command", "v"] if sys.platform == "darwin" else ["ctrl", "v"]
 
 
-def apply_command(streamer: "Streamer", cmd: dict):
-    """执行一条来自手机的指令。"""
+def _frame_xy(cmd: dict, t: str):
+    """校验指令坐标字段，返回 (x, y) 或 None（畸形时 WARN 留痕）。
+
+    拒绝四类：丢字段、非数字类型（str/list/dict/bool 不做隐式转换——
+    协议里坐标就是数字，"10" 是违约不是数据）、NaN/inf
+    （Python 的 json 扩展语法允许它们进 dict——注入即坐标虚拟化）。
+    """
+    x, y = cmd.get("x"), cmd.get("y")
+    for v in (x, y):
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            log("WARN", f"坐标字段缺失或非数字 [{t}]：{cmd}")
+            return None
+    if x != x or y != y or x in (float("inf"), float("-inf")) or y in (float("inf"), float("-inf")):
+        log("WARN", f"坐标非法（NaN/inf）[{t}]：{cmd}")
+        return None
+    return x, y
+
+
+def apply_command(streamer, cmd):
+    """执行一条来自手机的指令。顶层非对象消息静默拒绝（不炸连接）。
+
+    streamer 只需实现 frame_to_screen/set_preset/set_resolution；
+    不写 Streamer 注解：引号内名字仍需导入才能解析（违反 command→capture
+    的反向依赖禁令），类型检查交给协议测试的桩。
+    """
+    if not isinstance(cmd, dict):
+        log("WARN", f"非对象消息已拒绝：{cmd!r}")
+        return
     t = cmd.get("t")
     mods = [k for k in cmd.get("mods", []) if isinstance(k, str)]
     try:
         if t == "move":
-            x, y = streamer.frame_to_screen(cmd["x"], cmd["y"])
+            xy = _frame_xy(cmd, t)
+            if xy is None:
+                return
+            x, y = streamer.frame_to_screen(*xy)
             _INJ.moveTo(x, y)
 
         elif t == "click":
-            x, y = streamer.frame_to_screen(cmd["x"], cmd["y"])
+            xy = _frame_xy(cmd, t)
+            if xy is None:
+                return
+            x, y = streamer.frame_to_screen(*xy)
             button = cmd.get("button", "left")
             if button not in ("left", "right", "middle"):
                 log("WARN", f"未知鼠标按钮 {button!r}，按 left 处理")
@@ -122,7 +150,16 @@ def apply_command(streamer: "Streamer", cmd: dict):
             if v in (None, "auto", ""):
                 streamer.set_resolution(None)
             else:
-                streamer.set_resolution(float(v))
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    log("WARN", f"分辨率字段非数字：{v!r}")
+                    return
+                # float("nan")/inf 能溜过 max/min 钳制（nan 不参与比较），必须先挡
+                if v != v or v in (float("inf"), float("-inf")):
+                    log("WARN", f"分辨率非法（NaN/inf）：{v}")
+                    return
+                streamer.set_resolution(v)
 
         else:
             log("WARN", f"未知指令：{cmd}")
