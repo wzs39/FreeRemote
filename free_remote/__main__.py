@@ -2,6 +2,8 @@
 """FreeRemote 命令行入口。"""
 import argparse
 import asyncio
+import errno
+import subprocess
 import sys
 import time
 
@@ -159,7 +161,35 @@ def main():
         import ssl
         ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_ctx.load_cert_chain(args.tls_cert, args.tls_key)
-    web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_ctx, print=None)
+    try:
+        web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_ctx, print=None)
+    except OSError as e:
+        # 端口被占用等绑定失败：给出可操作指引，以退出码 3 退出
+        # （看门狗约定：退出码 3 = 明确要求退出，不重启，避免崩溃循环）
+        if e.errno == errno.EADDRINUSE:
+            out("=" * 58)
+            out(f" ⚠ 端口 {args.port} 已被占用，无法启动（通常已有 FreeRemote 在运行）")
+            pid = _port_pid(args.port)
+            if pid:
+                out(f"   占用进程 PID : {pid}")
+            out("   处理方式（任选其一）：")
+            out("     1. 运行 stop.bat 结束已有实例后重试")
+            out(f"     2. 换端口启动：python server.py --port {args.port + 1}")
+            out("=" * 58)
+            sys.exit(3)
+        raise
+
+
+def _port_pid(port):
+    """尽力查询占用端口的进程 PID（Windows netstat；失败返回 None）。"""
+    try:
+        r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=10)
+        for line in r.stdout.splitlines():
+            if f":{port} " in line and "LISTENING" in line.upper():
+                return line.split()[-1]
+    except Exception:
+        pass
+    return None
 
 
 if __name__ == "__main__":
