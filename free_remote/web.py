@@ -75,6 +75,17 @@ async def doctor_handler(request):
     return web.FileResponse(BASE_DIR / "web" / "doctor.html", headers=NO_CACHE)
 
 
+async def js_handler(request):
+    """前端 ES 模块（web/js/*.js），带内容类型与缓存禁用。"""
+    name = request.match_info["name"]
+    if "/" in name or "\\" in name or not name.endswith(".js") or not name.replace(".", "").replace("-", "").isalnum():
+        raise web.HTTPNotFound
+    path = BASE_DIR / "web" / "js" / name
+    if not path.is_file():
+        raise web.HTTPNotFound
+    return web.FileResponse(path, headers={**NO_CACHE, "Content-Type": "application/javascript"})
+
+
 async def manifest_handler(request):
     """PWA manifest（手机"添加到主屏幕"用）。"""
     return web.FileResponse(BASE_DIR / "web" / "manifest.json",
@@ -259,6 +270,7 @@ def make_app(args) -> web.Application:
     app.router.add_get("/files", files_handler)
     app.router.add_post("/upload", upload_handler)
     app.router.add_get("/download", download_handler)
+    app.router.add_get("/js/{name}", js_handler)
     app.router.add_get("/manifest.json", manifest_handler)
     app.router.add_get("/icons/{name}", icon_handler)
     # MJPEG 广播器为懒启动：有订阅者才采集，避免与分块通道重复采集

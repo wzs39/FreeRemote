@@ -24,6 +24,11 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 WATCH_FILES = ["server.py", "token.txt", "web/index.html",
+               "web/js/state.js", "web/js/info.js", "web/js/quality.js",
+               "web/js/ctl.js", "web/js/gestures.js", "web/js/control.js",
+               "web/js/files.js", "web/js/prefs.js", "web/js/bigmode.js",
+               "web/js/keyboard.js", "web/js/login.js", "web/js/video.js",
+               "web/js/view.js", "web/js/mjpeg.js", "web/js/main.js",
                "free_remote/config.py", "free_remote/capture.py", "free_remote/command.py",
                "free_remote/injection.py",
                "free_remote/web.py", "free_remote/webcore.py", "free_remote/relay.py",
