@@ -15,6 +15,7 @@
 """
 import ctypes
 import sys
+import time
 
 available = sys.platform.startswith("win")
 IS_WIN = available
@@ -120,18 +121,25 @@ if available:
         user32.GetCursorPos(ctypes.byref(pt))
         return pt.x, pt.y
 
-    _BTN = {"left": 0x02, "right": 0x08, "middle": 0x20}
+    # 鼠标按钮 → (DOWN 标志, UP 标志)，Windows 常量：
+    #   左 0x0002/0x0004  右 0x0008/0x0010  中 0x0020/0x0040（滚轮 0x0800/0x1000 在 scroll）
+    _BTN_FLAGS = {
+        "left":   (0x0002, 0x0004),
+        "right":  (0x0008, 0x0010),
+        "middle": (0x0020, 0x0040),
+    }
 
     def click(x, y, button="left", clicks=1):
-        vk = _BTN.get(button, 0x02)
-        du = {0x02: (0x0004, 0x0008), 0x08: (0x0010, 0x0020), 0x20: (0x0040, 0x0080)}[vk]
+        flags = _BTN_FLAGS.get(button, _BTN_FLAGS["left"])
         for _ in range(max(1, int(clicks))):
             move_to(x, y)
-            for flag in du:
+            for flag in flags:
                 mi = _MOUSEINPUT(0, 0, 0, flag, 0, None)
                 inp = _INPUT(type=INPUT_MOUSE)
                 inp.mi = mi
                 user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
+                if flag == flags[0]:
+                    time.sleep(0.001)  # down→up 间隔，否则部分程序识别不到完整点击
 
     def scroll(dy=0, dx=0):
         if dy:
