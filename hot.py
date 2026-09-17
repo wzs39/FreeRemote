@@ -23,8 +23,7 @@ import time
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-WATCH_FILES = ["server.py", "token.txt", "web/index.html",
-               "web/js/state.js", "web/js/info.js", "web/js/quality.js",
+WATCH_FILES = ["server.py", "token.txt", "web/index.html", "web/js/state.js", "web/js/proto.js", "web/js/info.js", "web/js/quality.js",
                "web/js/ctl.js", "web/js/gestures.js", "web/js/control.js",
                "web/js/files.js", "web/js/prefs.js", "web/js/bigmode.js",
                "web/js/keyboard.js", "web/js/login.js", "web/js/video.js",

@@ -61,10 +61,16 @@ export function ctlUrl() {
 }
 
 /* 发送注入：control 通道的 send 实现在 ctl.js，经 bindSend 反转依赖，
- * 其余模块统一 import { send } —— 打破 ctl↔control/info/quality 的环。 */
+ * 其余模块统一 import { send } —— 打破 ctl↔control/info/quality 的环。
+ * 发送前经 proto.sanitize 校验：畸形消息在源头丢弃（服务端契约的前端镜像）。 */
+import { sanitize } from "./proto.js";
 var _sender = null;
 export function bindSend(f) { _sender = f; }
-export function send(obj) { if (_sender) _sender(obj); }
+export function send(obj) {
+  if (!_sender) return;
+  var clean = sanitize(obj);
+  if (clean) _sender(clean);
+}
 
 /* DOM 引用（initDom 后可用；模块按需 import，避免循环依赖） */
 export var screenEl, stage, vcanvas, vctx, ccanvas, cctx, vwrap, view;

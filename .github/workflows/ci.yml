@@ -26,6 +26,14 @@ jobs:
         run: |
           python -m pyflakes free_remote/ server.py tests/
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 前端协议校验行为锁（node 零依赖）
+        run: |
+          node tests/web_proto.test.mjs
+
       - name: 测试（47 项行为锁）
         run: |
           python -m pytest tests/ -q --tb=short
