@@ -4,13 +4,13 @@ import sys
 
 import pyperclip
 
-from .injection import INJ, force_release_all_mods
+from .injection import INJ, force_release_all_keys, force_release_all_mods
 from .logging_util import log
 
 # 统一注入门面（injection.py 是基础设施层，capture 同样只依赖它）
 _INJ = INJ
 
-__all__ = ["apply_command", "force_release_all_mods", "_INJ"]
+__all__ = ["apply_command", "force_release_all_keys", "force_release_all_mods", "_INJ"]
 
 
 def _with_mods(mods, fn):
@@ -138,8 +138,8 @@ def apply_command(streamer, cmd):
                     _INJ.hotkey(*_paste_keys())
 
         elif t == "releasekeys":
-            # 手机端"解锁键盘"：修饰键疑似卡住时一键恢复（页面失灵自救）
-            force_release_all_mods("手机端请求")
+            # 手机端"解锁键盘"/断线自愈：全量释放按住键（含非修饰键，如游戏按住的 w）
+            force_release_all_keys(str(cmd.get("reason") or "手机端请求"))
 
         elif t == "setpreset":
             # 手机端切换画质（中继模式下由电脑端本地编码）

@@ -9,7 +9,7 @@ import time
 from aiohttp import web, WSMsgType
 
 from .capture import Broadcaster, BlockEncoder, FrameSource, HealthMonitor, Streamer, cursor_frame
-from .command import apply_command, force_release_all_mods
+from .command import apply_command, force_release_all_keys
 from .config import BASE_DIR, BOUNDARY, QUALITY_PRESETS
 from .fileshare import download_handler, files_handler, upload_handler
 from .webcore import (
@@ -229,8 +229,8 @@ async def ws_handler(request):
             elif msg.type == WSMsgType.ERROR:
                 break
     finally:
-        # 断线（手机锁屏/切后台/网络切换）时强制释放修饰键，防止电脑端卡键
-        await loop.run_in_executor(None, force_release_all_mods, "控制连接断开")
+        # 断线（手机锁屏/切后台/网络切换）时全量释放按住键（含非修饰键），防止电脑端卡键
+        await loop.run_in_executor(None, force_release_all_keys, "控制连接断开")
     audit(request.app, "控制连接断开", client_ip(request))
     return ws
 

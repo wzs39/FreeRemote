@@ -93,7 +93,7 @@ if available:
             return ord(n.upper())
         return None
 
-    _held = set()  # 本进程逻辑按住的修饰键（唯一事实来源）
+    _held = set()  # 本进程注入且尚未抬起的键（唯一事实来源，含非修饰键）
 
     def _send_key(vk, up=False):
         ki = _KEYBDINPUT(vk, 0, KEYEVENTF_KEYUP if up else 0, 0, None)
@@ -156,7 +156,7 @@ if available:
             inp.mi = mi
             user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
 
-    # ---------------- 键盘（修饰键状态唯一所有者） ----------------
+    # ---------------- 键盘（按住键状态唯一所有者，含非修饰键） ----------------
     def mod_down(name: str) -> bool:
         vk = _resolve_vk(name)
         if vk is None:
@@ -178,7 +178,10 @@ if available:
         return name.strip().lower() in _held
 
     def release_all():
-        """只对真正按着的修饰键发 keyUp（盲发反而可能误伤物理按键）。"""
+        """释放本进程注入且尚未抬起的全部键（含非修饰键，如按住的游戏键）。
+
+        只对 _held 里真实有记录的键发 keyUp——不盲发，不误伤物理按键。
+        手机端断线/“解锁键盘”都经此全量释放。"""
         n = len(_held)
         for k in list(_held):
             mod_up(k)
@@ -186,14 +189,15 @@ if available:
 
     def key(name: str, up=False):
         n = name.strip().lower()
-        if n in _MOD_VK:
-            # 修饰键统一走持有状态：无论从哪个入口按下，release_all() 都能真正释放
-            (mod_up if up else mod_down)(n)
-            return
         vk = _resolve_vk(name)
         if vk is None:
             raise ValueError(f"未知键名：{name}")
         _send_key(vk, up=up)
+        # 全部键入册（不只修饰键）：断线 release_all 才能释放游戏里按住的普通键
+        if up:
+            _held.discard(n)
+        else:
+            _held.add(n)
 
     # ---- pyautogui 兼容接口（server.py 统一经 _INJ 调度） ----
     def moveTo(x, y):

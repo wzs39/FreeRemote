@@ -12,7 +12,7 @@ import aiohttp
 from aiohttp import WSMsgType
 
 from .capture import BlockEncoder, Streamer, _pace, cursor_frame
-from .command import apply_command
+from .command import apply_command, force_release_all_keys
 from .config import BASE_DIR
 from .fileshare import list_entries, resolve_fs_path, safe_file_name
 from .health import HealthMonitor
@@ -249,19 +249,23 @@ async def _relay_heartbeat(ws):
 
 
 async def _command_loop(ws, streamer, loop):
-    """中继下行：控制指令。"""
-    async for msg in ws:
-        if msg.type == WSMsgType.TEXT:
-            try:
-                cmd = json.loads(msg.data)
-            except json.JSONDecodeError:
-                continue
-            # 统一入口：所有指令都交给 apply_command；画质/分辨率变化额外回报设备信息
-            await loop.run_in_executor(None, apply_command, streamer, cmd)
-            if cmd.get("t") in ("setpreset", "setres"):
-                await send_device_info(ws, streamer)
-        elif msg.type == WSMsgType.ERROR:
-            break
+    """中继下行：控制指令。断开时全量释放按住键（中继模式手机断线电脑不可见，
+    靠自身与中继的心跳断开在 finally 兑底；正常关停同样覆盖）。"""
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                try:
+                    cmd = json.loads(msg.data)
+                except json.JSONDecodeError:
+                    continue
+                # 统一入口：所有指令都交给 apply_command；画质/分辨率变化额外回报设备信息
+                await loop.run_in_executor(None, apply_command, streamer, cmd)
+                if cmd.get("t") in ("setpreset", "setres"):
+                    await send_device_info(ws, streamer)
+            elif msg.type == WSMsgType.ERROR:
+                break
+    finally:
+        await loop.run_in_executor(None, force_release_all_keys, "中继连接断开")
 
 
 

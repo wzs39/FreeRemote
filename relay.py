@@ -710,6 +710,15 @@ class Relay:
                 elif msg.type == WSMsgType.ERROR:
                     break
         finally:
+            # 手机断线（锁屏/切后台/网络切换）时电脑端不可见——合成全量释放指令下发，
+            # 否则按住的键（含游戏里的普通键）会一直卡到物理触碰
+            conn = self.conns.get(device_id)
+            if conn is not None and not conn.ws.closed:
+                try:
+                    await conn.ws.send_str(json.dumps(
+                        {"t": "releasekeys", "reason": "手机断线(中继下发)"}))
+                except Exception:
+                    pass
             self.log_session("手机会话结束(控制)", device_id, "",
                              f"duration={int(time.time() - t0)}s")
         return ws

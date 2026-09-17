@@ -78,9 +78,17 @@ def test_click_with_mods_wraps(spy):
 
 def test_releasekeys_routes_to_force_release(spy, monkeypatch):
     seen = []
-    monkeypatch.setattr(command, "force_release_all_mods", lambda r="": seen.append(r))
+    monkeypatch.setattr(command, "force_release_all_keys", lambda r="": seen.append(r))
     apply_command(S(), {"t": "releasekeys"})
     assert seen and "手机端请求" in seen[0]
+
+
+def test_releasekeys_reason_passthrough(spy, monkeypatch):
+    """中继服务器合成的释放指令带 reason，透传到释放函数供日志溯源。"""
+    seen = []
+    monkeypatch.setattr(command, "force_release_all_keys", lambda r="": seen.append(r))
+    apply_command(S(), {"t": "releasekeys", "reason": "手机断线(中继下发)"})
+    assert seen == ["手机断线(中继下发)"]
 
 
 def test_key_combo_order(spy):

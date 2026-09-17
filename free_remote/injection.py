@@ -31,13 +31,19 @@ INJ = _win if _WIN_USABLE else pyautogui
 IS_WIN_ENGINE = _WIN_USABLE
 
 
-def force_release_all_mods(reason: str = "") -> int:
-    """强制释放所有修饰键，防"卡键"。
+def force_release_all_keys(reason: str = "") -> int:
+    """强制释放本进程注入且尚未抬起的全部键（含非修饰键，如游戏里按住的 w）。"""
+    return _force_release(reason, "全部按住键")
 
-    Windows 引擎：只释放 _held 里真正按住的键（不盲发，不误伤物理按键）。
-    pyautogui 回退：盲发 4 个 keyUp 兜底。
-    返回释放的按住状态数（供日志）。
-    """
+
+def force_release_all_mods(reason: str = "") -> int:
+    """旧名兼容：断线/解锁键盘实际全量释放（含非修饰键）。"""
+    return force_release_all_keys(reason)
+
+
+def _force_release(reason: str, what: str) -> int:
+    """Windows 引擎：只释放 _held 里真正按住的键（不盲发，不误伤物理按键）。
+    pyautogui 回退：盲发常用键 keyUp 兜底。返回释放的按住状态数（供日志）。"""
     if _WIN_USABLE:
         n = _win.release_all()
     else:
@@ -49,7 +55,7 @@ def force_release_all_mods(reason: str = "") -> int:
                 pass
     if reason:
         from .logging_util import log
-        log("INFO", f"已强制释放修饰键（{reason}，{n} 个按住状态），防卡键")
+        log("INFO", f"已强制释放{what}（{reason}，{n} 个按住状态），防卡键")
     return n
 
 
