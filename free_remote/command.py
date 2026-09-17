@@ -35,6 +35,18 @@ def _is_ascii_printable(s: str) -> bool:
     return bool(s) and all(not (ord(c) < 0x20 or ord(c) > 0x7E) for c in s)
 
 
+_KEY_MAX_LEN = 32       # 键名长度上限（最长键名 browserforward=14，留足余量）
+_COMBO_MAX_KEYS = 6     # 组合键成员上限
+_TEXT_MAX_LEN = 2000    # 文本上限（镜像前端 proto.js；无上限时 4M 字符 ≈ 11 小时连续击键）
+
+
+def _key_ok(k) -> bool:
+    """键名形状守卫：非空短字符串、无空白/控制符。
+    权威键名判定在引擎层（未知键名 ValueError 被顶层兜底）。"""
+    return (isinstance(k, str) and 1 <= len(k) <= _KEY_MAX_LEN
+            and not any(ord(c) < 0x20 or c == " " for c in k))
+
+
 def _paste_keys():
     """粘贴组合键：macOS 用 Cmd+V，其它平台用 Ctrl+V。"""
     return ["command", "v"] if sys.platform == "darwin" else ["ctrl", "v"]
@@ -103,39 +115,46 @@ def apply_command(streamer, cmd):
                 ),
             )
 
-        elif t == "keydown":
-            _with_mods(mods, lambda: _INJ.keyDown(cmd["key"]))
-        elif t == "keyup":
-            _with_mods(mods, lambda: _INJ.keyUp(cmd["key"]))
-        elif t == "press":
-            _with_mods(mods, lambda: _INJ.press(cmd["key"]))
+        elif t in ("keydown", "keyup", "press"):
+            k = cmd.get("key")
+            if not _key_ok(k):
+                log("WARN", f"[{t}] key 字段非法：{k!r}")
+                return
+            fn = {"keydown": _INJ.keyDown, "keyup": _INJ.keyUp, "press": _INJ.press}[t]
+            _with_mods(mods, lambda: fn(k))
 
         elif t == "combo":
-            # 例如 ["ctrl","alt","del"]：按住前面的键，按下最后一个
-            keys = cmd["keys"]
-            if keys:
-                for k in keys[:-1]:
-                    _INJ.keyDown(k)
-                try:
-                    _INJ.press(keys[-1])
-                finally:
-                    for k in reversed(keys[:-1]):
-                        _INJ.keyUp(k)
+            # 例如 ["ctrl","alt","del"]：按住前面的键，按下最后一个。
+            # 形状守卫：字符串 "win" 会被按字符迭代逐键注入，必须为键名列表。
+            keys = cmd.get("keys")
+            if not isinstance(keys, list) or not 1 <= len(keys) <= _COMBO_MAX_KEYS \
+                    or not all(_key_ok(k) for k in keys):
+                log("WARN", f"combo keys 形状非法：{keys!r}")
+                return
+            for k in keys[:-1]:
+                _INJ.keyDown(k)
+            try:
+                _INJ.press(keys[-1])
+            finally:
+                for k in reversed(keys[:-1]):
+                    _INJ.keyUp(k)
 
         elif t == "text":
             text = cmd.get("text", "")
-            if text:
-                if _is_ascii_printable(text):
-                    # 英文/符号：电脑端直接逐键敲出（不需要剪贴板，macOS/弱网更稳）
-                    try:
-                        _INJ.typewrite(text, interval=0.01)
-                    except Exception:
-                        pyperclip.copy(text)
-                        _INJ.hotkey(*(_paste_keys()))
-                else:
-                    # 中文等：复制到剪贴板后 Ctrl/Cmd+V 粘贴
+            if not isinstance(text, str) or not 1 <= len(text) <= _TEXT_MAX_LEN:
+                log("WARN", f"text 字段非法（类型/长度）：{str(text)[:80]!r}")
+                return
+            if _is_ascii_printable(text):
+                # 英文/符号：电脑端直接逐键敲出（不需要剪贴板，macOS/弱网更稳）
+                try:
+                    _INJ.typewrite(text, interval=0.01)
+                except Exception:
                     pyperclip.copy(text)
-                    _INJ.hotkey(*_paste_keys())
+                    _INJ.hotkey(*(_paste_keys()))
+            else:
+                # 中文等：复制到剪贴板后 Ctrl/Cmd+V 粘贴
+                pyperclip.copy(text)
+                _INJ.hotkey(*_paste_keys())
 
         elif t == "releasekeys":
             # 手机端"解锁键盘"/断线自愈：全量释放按住键（含非修饰键，如游戏按住的 w）

@@ -256,8 +256,8 @@ async def _command_loop(ws, streamer, loop):
             if msg.type == WSMsgType.TEXT:
                 try:
                     cmd = json.loads(msg.data)
-                except json.JSONDecodeError:
-                    continue
+                except (json.JSONDecodeError, RecursionError):
+                    continue  # 坏 JSON 与深嵌套（>递归深度）同样静默丢弃，连接不受影响
                 # 统一入口：所有指令都交给 apply_command；画质/分辨率变化额外回报设备信息
                 await loop.run_in_executor(None, apply_command, streamer, cmd)
                 if cmd.get("t") in ("setpreset", "setres"):

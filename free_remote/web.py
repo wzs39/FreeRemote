@@ -214,7 +214,7 @@ async def ws_handler(request):
     if not auth_ok(request):
         return web.Response(status=403)
     streamer = request.app["streamer"]
-    ws = web.WebSocketResponse(heartbeat=30)
+    ws = web.WebSocketResponse(heartbeat=30, max_msg_size=64 * 1024)
     await ws.prepare(request)
     audit(request.app, "控制连接建立", client_ip(request))
     loop = asyncio.get_running_loop()
@@ -223,8 +223,8 @@ async def ws_handler(request):
             if msg.type == WSMsgType.TEXT:
                 try:
                     cmd = json.loads(msg.data)
-                except json.JSONDecodeError:
-                    continue
+                except (json.JSONDecodeError, RecursionError):
+                    continue  # 坏 JSON 与深嵌套（>递归深度）同样静默丢弃，连接不受影响
                 await loop.run_in_executor(None, apply_command, streamer, cmd)
             elif msg.type == WSMsgType.ERROR:
                 break

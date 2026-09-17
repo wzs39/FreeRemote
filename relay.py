@@ -696,7 +696,7 @@ class Relay:
         t0 = time.time()
         self.stats["phone_control"] += 1
         self.log_session("手机会话开始(控制)", device_id, ip)
-        ws = web.WebSocketResponse(heartbeat=30)
+        ws = web.WebSocketResponse(heartbeat=30, max_msg_size=64 * 1024)
         await ws.prepare(request)
         try:
             async for msg in ws:
