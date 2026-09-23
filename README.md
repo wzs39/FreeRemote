@@ -308,6 +308,8 @@ python server.py --port 8443 --token xxx --tls-cert cert.pem --tls-key key.pem
   （超时自动下线重连），配合 `/devices` 端点可实时掌握所有设备的在线与存活状态。
 - 运行日志统一分级：`logs/server.log` / `logs/relay.log` 每行带 `[时间] [级别]`（INFO/WARN/ERROR），
   **查错误一条命令：`grep "[ERROR]" logs/server.log`（或 logs/relay.log）**，详见使用手册「13. 日志与排查」。
+- 看门狗自身行为（启动/重启/热更新/退出码）独立记录在 `logs/watchdog.log`——服务"起不来/反复重启"
+  先看它，再看 server.log。
 
 ### 6. 其它基线
 
@@ -351,8 +353,9 @@ relay.py           中继服务器：识别码配对，跨网络转发帧/指令
 doctor.py          自检工具：环境/采集/注入/网络/安全体检 + 补救方案
 web/index.html     手机端网页：登录 + 监看 + 手势控制 + 虚拟键盘 + 文件互传（两种模式通用）
 web/doctor.html    手机端自检仪表盘（/doctor）
-run.bat / run.sh   一键启动脚本（Windows / macOS·Linux，含防重复启动检查）
-stop.bat / stop.sh 一键停止所有 FreeRemote 进程（清理旧客户端遗留进程）
+start.bat         一键启动（Windows：后台启动+健康检查+自动开浏览器；失败时看 logs/watchdog.log）
+run.bat / run.sh   一键启动脚本（前台运行；Windows 双击 start.bat 更省心）
+stop.bat / stop.sh 一键停止所有 FreeRemote 进程（先杀看门狗防"复活"）
 doctor.bat / doctor.sh  自检快捷脚本
 logs/              运行日志目录：server.log / relay.log / security.log / sessions.log（自动生成，均已 gitignore）
 requirements.txt   依赖清单

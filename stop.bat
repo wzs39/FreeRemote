@@ -10,7 +10,7 @@ cd /d "%~dp0"
 setlocal enabledelayedexpansion
 echo 正在停止 FreeRemote...
 
-rem 1) start.bat 记录的看门狗 pid（确认是 python 进程才杀，防 PID 复用误杀）
+rem 1) pid 文件里的看门狗（由 hot.py 自己写入；确认是 python 进程才杀，防 PID 复用误杀）
 if exist ".freebuff\hot.pid" (
     set /p HPID=<".freebuff\hot.pid"
     if defined HPID (

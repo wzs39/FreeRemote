@@ -49,9 +49,10 @@ if not defined RUN_ARGS if exist "relay-config.txt" (
 )
 
 rem ---------- [2/3] 隐藏后台启动看门狗 ----------
+rem pid 文件由看门狗自己写入（单实例锁：重复启动会被拒绝并记录到 logs/watchdog.log）
 echo [2/3] 后台启动 FreeRemote（看门狗托管，关掉本窗口服务照常运行）...
 if not exist ".freebuff" mkdir ".freebuff"
-powershell -NoProfile -Command "(Start-Process -FilePath '%CD%\.venv\Scripts\python.exe' -ArgumentList 'hot.py %RUN_ARGS%' -WorkingDirectory '%CD%' -WindowStyle Hidden -PassThru).Id" > ".freebuff\hot.pid" 2>nul
+powershell -NoProfile -Command "Start-Process -FilePath '%CD%\.venv\Scripts\python.exe' -ArgumentList 'hot.py %RUN_ARGS%' -WorkingDirectory '%CD%' -WindowStyle Hidden" >nul 2>&1
 
 rem ---------- [3/3] 健康检查：最多等 30 秒 ----------
 echo [3/3] 等待服务就绪...
@@ -66,8 +67,13 @@ rem curl 不可用时的 TCP 兜底探测
 powershell -NoProfile -Command "if((New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%)).Connected){exit 0}else{exit 1}" >nul 2>&1
 if not errorlevel 1 goto :up
 if %TRIES% GEQ 15 (
-    echo [错误] 服务 30 秒内未就绪，请查看 logs\server.log
+    echo [错误] 服务 30 秒内未就绪，已停止本次启动（进程已清理）。
+    echo 排障顺序：先看 logs\watchdog.log（看门狗行为），再看 logs\server.log（服务日志）
     echo 常见原因：端口被占用（双击 stop.bat 清理后重试）/ 依赖未装完
+    rem 失败时清掉 pid 记录并停掉半启动的看门狗，避免下次被单实例锁拒绝
+    if exist ".freebuff\hot.pid" for /f %%p in (.freebuff\hot.pid) do tasklist /FI "PID eq %%p" 2>nul | findstr /I "python" >nul 2>&1 && taskkill /F /PID %%p >nul 2>&1
+    del ".freebuff\hot.pid" >nul 2>&1
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python' -and $_.CommandLine -match 'hot\.py|server\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     pause
     exit /b 1
 )
@@ -75,6 +81,8 @@ goto :waitloop
 
 :up
 echo 服务已就绪。
+set /p HPID=<".freebuff\hot.pid" 2>nul
+if defined HPID echo （看门狗 PID !HPID! 托管运行中）
 set /p FTOKEN=<"token.txt" 2>nul
 if not defined FTOKEN set "FTOKEN="
 start "" "http://127.0.0.1:%PORT%/?token=%FTOKEN%"
