@@ -1,6 +1,6 @@
-/* 手势状态机（stage 触摸）：单击=左键 双击=双击 长按=右键 拖动=移动 双指=滚轮/捏合缩放。 */
+/* 手势状态机（stage 触摸）：单击=左键 双击=双击 长按=右键 拖动=移动 双指=捏合缩放/滚动。 */
 import {
-  $, stage, view, wsOk, info, activeMods, setLastFrame,
+  $, stage, view, wsOk, info, sens, wheelSpeed, send, activeMods, setLastFrame,
 } from "./state.js";
 
 var pointers = new Map();
@@ -10,6 +10,8 @@ var lastSent = null, lastTap = null;
 /* ---------- 捏合缩放（本地视图变换，不影响推流） ---------- */
 var zoom = { s: 1, x: 0, y: 0 };
 var pinch = null;          // { dist, cx, cy, s, x, y } 捏合起始状态
+var gestureMode = null;    // 双指手势判定：null=未判定 pinning中 | "pinch" | "scroll"
+var f1b = null, f2b = null; // 门控基准：判定前各指的基准位置
 var panning = false;       // 缩放后的单指平移
 var panStart = null;       // { px, py, x, y }
 var ZOOM_MIN = 1, ZOOM_MAX = 5;
@@ -69,7 +71,11 @@ stage.addEventListener("pointerdown", function (e) {
     clearTimeout(pressTimer);
     lastCentroid = centroid();
     var st = pinchState();
+    var pts0 = Array.from(pointers.values());
     pinch = { dist: st.dist, cx: st.cx, cy: st.cy, s: zoom.s, x: zoom.x, y: zoom.y };
+    f1b = { x: pts0[0].x, y: pts0[0].y };
+    f2b = { x: pts0[1].x, y: pts0[1].y };
+    gestureMode = null;
   } else if (pointers.size === 1 && zoom.s > 1.02) {
     panning = true; multi = true;
     panStart = { px: e.clientX, py: e.clientY, x: zoom.x, y: zoom.y };
@@ -93,13 +99,36 @@ stage.addEventListener("pointermove", function (e) {
   var dx = e.clientX - p.x, dy = e.clientY - p.y;
   p.x = e.clientX; p.y = e.clientY;
   if (pinch && pointers.size === 2) {
-    var st = pinchState();
-    zoom.s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinch.s * (st.dist / pinch.dist)));
-    zoom.x = pinch.x + (st.cx - pinch.cx);
-    zoom.y = pinch.y + (st.cy - pinch.cy);
-    clampZoom();
-    applyZoom();
-    lastCentroid = centroid();
+    // 批次门控：等双指都有位移（各 >=6px）再判定方向。真实浏览器的双指 move
+    // 是两个独立事件，平移时首根手指的 move 先到、距离剧变，逐事件判定会把
+    // 滚动误判成捏合并永久锁定（上一版距离比门控的时序缺陷）。
+    // 判定：相对位移 |d1-d2| 主导 = 捏合；同向位移 |d1+d2| 主导 = 滚动。
+    if (!gestureMode) {
+      var pts = Array.from(pointers.values());
+      var d1x = pts[0].x - f1b.x, d1y = pts[0].y - f1b.y;
+      var d2x = pts[1].x - f2b.x, d2y = pts[1].y - f2b.y;
+      if (Math.hypot(d1x, d1y) >= 6 && Math.hypot(d2x, d2y) >= 6) {
+        var px = d1x + d2x, py = d1y + d2y;
+        var sx = d1x - d2x, sy = d1y - d2y;
+        gestureMode = (sx * sx + sy * sy > px * px + py * py) ? "pinch" : "scroll";
+        lastCentroid = { x: pinch.cx, y: pinch.cy }; // 从手势起点累计，不丢不重
+      } else return; // 歧义态：不动缩放、不发滚动
+    }
+    if (gestureMode === "pinch") {
+      var st2 = pinchState();
+      zoom.s = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, pinch.s * (st2.dist / pinch.dist)));
+      zoom.x = pinch.x + (st2.cx - pinch.cx);
+      zoom.y = pinch.y + (st2.cy - pinch.cy);
+      clampZoom();
+      applyZoom();
+      lastCentroid = centroid();
+      return;
+    }
+    var c = centroid();
+    var dy = Math.round((lastCentroid.y - c.y) * 0.7 * wheelSpeed);
+    var dx = Math.round((lastCentroid.x - c.x) * 0.5 * wheelSpeed);
+    if (dy !== 0 || dx !== 0) send({ t: "scroll", dy: dy, dx: dx, mods: activeMods() });
+    lastCentroid = c;
     return;
   }
   if (panning && pointers.size === 1) {
@@ -139,7 +168,7 @@ function endPointer(e) {
   var wasOne = pointers.size === 1;
   var wasPinch = !!pinch;
   pointers.delete(e.pointerId);
-  if (pointers.size < 2) pinch = null;
+  if (pointers.size < 2) { pinch = null; gestureMode = null; }
   if (pointers.size === 0) { panning = false; panStart = null; lastCentroid = null; }
   if (wasPinch || panning) { moved = true; return; }  // 缩放/平移不触发点击
   if (zoom.s > 1.02 && wasOne) {
@@ -187,7 +216,7 @@ setInterval(function () {
   if (pointers.size > 0 && Date.now() - lastTouchTs > 3000) {
     pointers.clear();
     clearTimeout(pressTimer);
-    pinch = null; panning = false; panStart = null; lastCentroid = null;
+    pinch = null; gestureMode = null; panning = false; panStart = null; lastCentroid = null;
     multi = false; moved = false; lastSent = null;
   }
 }, 1000);

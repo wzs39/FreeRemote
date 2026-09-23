@@ -30,9 +30,10 @@ jobs:
         with:
           node-version: "22"
 
-      - name: 前端协议校验行为锁（node 零依赖）
+      - name: 前端行为锁（node 零依赖：协议校验 + 手势状态机 + WS 重连）
         run: |
           node tests/web_proto.test.mjs
+          node tests/web_frontend.test.mjs
 
       - name: 测试（47 项行为锁）
         run: |
