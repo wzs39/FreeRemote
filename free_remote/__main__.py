@@ -165,13 +165,16 @@ def main():
         web.run_app(app, host=args.host, port=args.port, ssl_context=ssl_ctx, print=None)
     except OSError as e:
         # 端口被占用等绑定失败：给出可操作指引，以退出码 3 退出
-        # （看门狗约定：退出码 3 = 明确要求退出，不重启，避免崩溃循环）
+        # （看门狗约定：退出码 3 = 端口被占，退避 5 秒重试——占用可能是
+        #   系统临时分配给出站连接的瞬时冲突，稍后自会消失）
         if e.errno == errno.EADDRINUSE:
             out("=" * 58)
             out(f" ⚠ 端口 {args.port} 已被占用，无法启动（通常已有 FreeRemote 在运行）")
             pid = _port_pid(args.port)
             if pid:
-                out(f"   占用进程 PID : {pid}")
+                out(f"   占用进程 PID : {pid}（监听中，通常已有 FreeRemote 在运行）")
+            else:
+                out("   未发现监听进程（多为系统临时占用，服务稍后会自动重试）")
             out("   处理方式（任选其一）：")
             out("     1. 运行 stop.bat 结束已有实例后重试")
             out(f"     2. 换端口启动：python server.py --port {args.port + 1}")

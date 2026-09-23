@@ -19,7 +19,10 @@
     python hot.py --relay ...     # 识别码模式同样受保护
 
 退出：Ctrl+C 停止看门狗和服务；双击 stop.bat 会连看门狗一起停。
-约定：server.py 以退出码 3 结束时看门狗不重启（用于明确的"要求退出"）。
+约定：server.py 以退出码 3 结束（端口被占）时看门狗退避后重试——
+   占用可能来自系统临时分配的出站连接（不监听但占绑定），稍后自会消失；
+   立即放弃会把一次瞬时冲突变成"服务永久下线"。真实重复实例的场景
+   由 start.bat 的 LISTENING 预检拦截，不会走到这里。
 """
 
 import atexit
@@ -210,8 +213,11 @@ def main() -> int:
             ran = time.time() - start_ts
 
             if code == 3:
-                say("服务请求退出（exit 3），看门狗停止")
-                return 0
+                # 端口被占（EADDRINUSE）：多半是瞬时冲突（系统把该端口临时分配
+                # 给出站连接，不监听但占绑定），退避重试等它消失。
+                say("端口被占（exit 3），5 秒后重试（若已有 FreeRemote 在运行，请先 stop.bat）")
+                time.sleep(5.0)
+                continue
 
             if ran < FAST_FAIL_WINDOW:
                 fast_fails += 1

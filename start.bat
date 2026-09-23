@@ -67,13 +67,10 @@ rem curl 不可用时的 TCP 兜底探测
 powershell -NoProfile -Command "if((New-Object Net.Sockets.TcpClient('127.0.0.1',%PORT%)).Connected){exit 0}else{exit 1}" >nul 2>&1
 if not errorlevel 1 goto :up
 if %TRIES% GEQ 15 (
-    echo [错误] 服务 30 秒内未就绪，已停止本次启动（进程已清理）。
+    echo [提示] 30 秒内未就绪，但看门狗仍在后台运行并自动重试
+    echo （端口被占/依赖问题恢复后会自动拉起，无需重新双击）。
     echo 排障顺序：先看 logs\watchdog.log（看门狗行为），再看 logs\server.log（服务日志）
-    echo 常见原因：端口被占用（双击 stop.bat 清理后重试）/ 依赖未装完
-    rem 失败时清掉 pid 记录并停掉半启动的看门狗，避免下次被单实例锁拒绝
-    if exist ".freebuff\hot.pid" for /f %%p in (.freebuff\hot.pid) do tasklist /FI "PID eq %%p" 2>nul | findstr /I "python" >nul 2>&1 && taskkill /F /PID %%p >nul 2>&1
-    del ".freebuff\hot.pid" >nul 2>&1
-    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python' -and $_.CommandLine -match 'hot\.py|server\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    echo 完全停止：双击 stop.bat
     pause
     exit /b 1
 )
