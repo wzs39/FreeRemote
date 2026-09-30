@@ -237,6 +237,8 @@ async def ws_handler(request):
 
 async def on_shutdown(app):
     await app["broadcaster"].stop()
+    # 释放 DXGI 会话与 mss 句柄（dxcam 自身也有 atexit 兑底，这里主动收）
+    app["streamer"].close_backends()
 
 
 def make_app(args) -> web.Application:

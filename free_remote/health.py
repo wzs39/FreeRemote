@@ -60,6 +60,14 @@ class HealthMonitor:
         self.capture_ok += 1
         self.consecutive_fail = 0
 
+    def note_still(self):
+        """静止帧：流空闲而非变慢——刷新失败计数但不计入帧率。
+
+        若计入 note_ok，静止几秒后 fps_ema 会衰减到阈值以下，误触发降档。
+        """
+        self.last_frame_t = time.monotonic()
+        self.consecutive_fail = 0
+
     def note_fail(self, exc):
         self.capture_fail += 1
         self.consecutive_fail += 1

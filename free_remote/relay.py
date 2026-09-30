@@ -11,7 +11,8 @@ from urllib.parse import quote
 import aiohttp
 from aiohttp import WSMsgType
 
-from .capture import BlockEncoder, Streamer, _pace, cursor_frame
+from .capture import (ERROR as _DXGI_ERROR, STILL as _DXGI_STILL,
+                      BlockEncoder, Streamer, _pace, cursor_frame)
 from .command import apply_command, force_release_all_keys
 from .config import BASE_DIR
 from .fileshare import list_entries, resolve_fs_path, safe_file_name
@@ -224,7 +225,15 @@ async def _vstream_loop(ws_v, streamer, monitor, loop):
             if monitor.check_gil_pause(streamer):
                 await _pace(loop, 1.0, t0)
                 continue
-            rgb, w, h = await loop.run_in_executor(None, streamer.capture_rgb)
+            got = await loop.run_in_executor(None, streamer.capture_rgb)
+            if got is _DXGI_STILL:
+                await _pace(loop, streamer.fps, t0)
+                continue  # 静止：健康统计在 capture_rgb 里记过，只发心跳
+            if got is _DXGI_ERROR:
+                monitor.maybe_heal(streamer)
+                await _pace(loop, streamer.fps, t0)
+                continue
+            rgb, w, h = got
             if rgb:
                 monitor.maybe_heal(streamer)
                 cx, cy = cursor_frame(streamer)

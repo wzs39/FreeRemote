@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 
 from .config import QUALITY_PRESETS
+from .dxgi import DxgiCapturer, ERROR, STILL, is_available as _dxgi_available
 from .health import HealthMonitor
 from .injection import INJ
 from .logging_util import log
@@ -30,6 +31,14 @@ class Streamer:
         self.health = monitor  # 健康监控（自检/自愈）
         self._fallback = None  # 采集失败时发送的占位图
         self._view_sources = []  # 观看源注册表（FrameSource/Broadcaster 自注册）
+        # DXGI 抓屏后端：主显示器且可用时替代 mss/BitBlt，静止画面零开销。
+        # 创建失败或副显示器 → None，全部走 mss 路径（行为与旧版一致）。
+        self.dxgi = None
+        if _dxgi_available() and monitor_idx == 1:
+            try:
+                self.dxgi = DxgiCapturer()
+            except Exception as exc:
+                log("INFO", f"DXGI 初始化失败，回退 mss：{exc}")
 
     def register_view_source(self, src) -> None:
         """观看源（有 .has_subscribers() 的对象）注册自己——所有权归采集管道。"""
@@ -45,6 +54,12 @@ class Streamer:
             self.sct.close()
         except Exception:
             pass
+        if self.dxgi is not None:
+            try:
+                self.dxgi.reopen()
+            except Exception as exc:
+                log("INFO", f"DXGI 重建失败，回退 mss：{exc}")
+                self.dxgi = None
         try:
             self.sct = mss.MSS()
             monitors = self.sct.monitors
@@ -53,6 +68,15 @@ class Streamer:
             self._fallback = None
         except Exception as exc:
             log("ERROR", f"重建采集器失败：{exc}")
+
+    def close_backends(self):
+        """释放采集后端（进程退出时调用）：DXGI 会话 + mss 句柄。"""
+        if self.dxgi is not None:
+            self.dxgi.close()
+        try:
+            self.sct.close()
+        except Exception:
+            pass
 
     def set_preset(self, preset: str):
         if preset not in QUALITY_PRESETS:
@@ -83,7 +107,31 @@ class Streamer:
         return m["left"] + x / self.scale, m["top"] + y / self.scale
 
     def capture_rgb(self):
-        """采集一帧，返回 (RGB 原始字节, 宽, 高)，供分块增量编码使用。"""
+        """采集一帧，返回 (RGB 原始字节, 宽, 高)，供分块增量编码使用。
+
+        DXGI 后端新增第三种结果 STILL（哨兵对象，上层用 is 判断）：画面无新帧。
+        此时跳过缩放/diff——静止时省 CPU 的关键。mss 路径保持旧语义
+        （失败返回空字节串）。
+        """
+        if self.dxgi is not None:
+            tw, th = self.frame_size
+            try:
+                status, rgb, w, h = self.dxgi.capture_rgb(tw, th)
+            except Exception:
+                status, rgb, w, h = "error", b"", 0, 0
+            if status == "frame":
+                # 与 mss 路径同契约：返回缩放后的帧（frame_size），
+                # 缩放/换色已在 dxgi 后端内完成（小图上换通道，省 60% 耗时）
+                if self.health:
+                    self.health.note_ok()
+                return rgb, w, h
+            if status == "still":
+                if self.health:
+                    self.health.note_still()
+                return STILL  # 静止：既不是成功帧也不是失败
+            if self.health:
+                self.health.note_fail(Exception("dxgi capture failed"))
+            return ERROR
         try:
             img = self.sct.grab(self.monitor)
             pil = Image.frombytes("RGB", img.size, img.rgb)
@@ -103,8 +151,16 @@ class Streamer:
     def capture(self) -> bytes:
         """采集一帧并编码为 JPEG 字节；失败返回占位图并计入健康统计。"""
         try:
-            img = self.sct.grab(self.monitor)
-            pil = Image.frombytes("RGB", img.size, img.rgb)
+            if self.dxgi is not None:
+                status, rgb, w, h = self.dxgi.capture_rgb()
+                if status == "still":
+                    return b""  # 静止：MJPEG 备胎无需重发（b"" 为约定哨兵）
+                if status != "frame":
+                    return self._fallback or self._make_fallback()
+                pil = Image.frombytes("RGB", (w, h), rgb)
+            else:
+                img = self.sct.grab(self.monitor)
+                pil = Image.frombytes("RGB", img.size, img.rgb)
             w, h = self.frame_size
             if (w, h) != pil.size:
                 pil = pil.resize((w, h), Image.BILINEAR)
@@ -169,6 +225,9 @@ class Broadcaster:
                     await _pace(self._loop, 1.0, t0)
                     continue
                 data = await self._loop.run_in_executor(None, self.streamer.capture)
+                if data == b"":
+                    await _pace(self._loop, self.streamer.fps, t0)
+                    continue  # 静止帧：MJPEG 备胎无需重发
                 if data and data != self.streamer._fallback:
                     if self.streamer.health:
                         self.streamer.health.maybe_heal(self.streamer)  # 自愈
@@ -231,7 +290,18 @@ class FrameSource:
                 if self.streamer.health and self.streamer.health.check_gil_pause(self.streamer):
                     await _pace(self.loop, 1.0, t0)
                     continue
-                rgb, w, h = await self.loop.run_in_executor(None, self.streamer.capture_rgb)
+                got = await self.loop.run_in_executor(None, self.streamer.capture_rgb)
+                if got is STILL:
+                    # 静止帧：健康统计已在 capture_rgb 里记过，不打扰订阅者
+                    await _pace(self.loop, self.streamer.fps, t0)
+                    continue
+                if got is ERROR:
+                    # 采集失败（capture_rgb 已计数）：立即自愈，不等下一帧
+                    if self.streamer.health:
+                        self.streamer.health.maybe_heal(self.streamer)
+                    await _pace(self.loop, self.streamer.fps, t0)
+                    continue
+                rgb, w, h = got
                 if rgb:
                     # 主推流路径同样自愈：BitBlt 连续失败时重建采集器（此前仅 MJPEG/中继路径有）
                     if self.streamer.health:
