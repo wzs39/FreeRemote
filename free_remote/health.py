@@ -35,6 +35,9 @@ class HealthMonitor:
         self.fps_ema = 0.0
         self.last_frame_t = None
         self.degraded = False
+        self._auto_downgraded = False  # 本次降档是自动的（非手机端手动），允许自动回升
+        self._original_preset = None  # 自动降档时刻的档位（回升终点）
+        self._upgrade_stable_t = None  # 帧率首次回到回升阈值之上的时刻（持续稳定才回升）
         self.remedies = []  # [{at, action}] 自动补救记录
         self._last_reinit = 0.0  # 上次重建采集器时刻（防抖）
         self.reinit_count = 0
@@ -122,10 +125,54 @@ class HealthMonitor:
             order = ["high", "mid", "low"]
             idx = order.index(streamer.preset)
             if idx < len(order) - 1:
+                self._original_preset = streamer.preset
+                self._auto_downgraded = True
+                self._upgrade_stable_t = None
                 streamer.set_preset(order[idx + 1])
                 self.degraded = True
                 self.add_remedy(f"实际帧率 {self.fps_ema:.1f}fps 低于目标 {self.target_fps}fps，"
                                 f"已自动降为「{streamer.preset}」画质")
+        self._maybe_upgrade(streamer)
+
+    def _maybe_upgrade(self, streamer):
+        """画质自动回升：自动降档后帧率稳定 10 秒 → 升回一档（终点=降档前档位）。
+
+        仅对「自动降档」生效：手机端手动切档（on_manual_preset）即取消，
+        不越权覆盖用户的选择。帧率一旦跌回阈值之下，稳定计时清零重算。
+        """
+        if not self._auto_downgraded:
+            return
+        if streamer.preset == self._original_preset:  # 手动切回后残留状态兑底
+            self._auto_downgraded = False
+            self.degraded = False
+            self._upgrade_stable_t = None
+            return
+        if not (self.fps_ema and self.fps_ema >= self.target_fps * 0.85):
+            self._upgrade_stable_t = None  # 未达稳定线，计时清零
+            return
+        now = time.monotonic()
+        if self._upgrade_stable_t is None:
+            self._upgrade_stable_t = now  # 首次达标：开始计稳定窗
+            return
+        if now - self._upgrade_stable_t < 10.0:  # 需持续稳定 10 秒才升一档
+            return
+        order = ["low", "mid", "high"]
+        idx = min(order.index(streamer.preset) + 1, len(order) - 1)  # 升一档（升序 +1）
+        nxt = order[idx]
+        self._auto_downgraded = False
+        self._upgrade_stable_t = None
+        if nxt == self._original_preset:
+            self.degraded = False
+        streamer.set_preset(nxt)
+        self.add_remedy(f"帧率稳定在 {self.fps_ema:.1f}fps，画质自动回升为「{streamer.preset}」")
+
+    def on_manual_preset(self, preset):
+        """手机端手动切档：取消自动回升（以用户选择为准）。"""
+        if self._auto_downgraded:
+            self._auto_downgraded = False
+            self.degraded = False
+            self._upgrade_stable_t = None
+            self.add_remedy(f"手机端手动切换画质为「{preset}」，已取消自动回升")
 
     # ---- 自检报告（供 /status 与手机端自检页） ----
     def report(self, streamer=None, mode="lan", no_auth=False, token_len=0, ws_ok=None):

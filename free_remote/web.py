@@ -132,7 +132,10 @@ async def stream_handler(request):
     s = request.app["streamer"]
     q = request.query.get("q", s.preset)
     if q in QUALITY_PRESETS:
+        changed = q != s.preset  # 与当前相同（如重连带默认参）不算手动切换
         s.set_preset(q)
+        if changed and s.health:
+            s.health.on_manual_preset(q)  # 手动切档取消自动回升
 
     broadcaster = request.app["broadcaster"]
     queue = broadcaster.subscribe()

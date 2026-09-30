@@ -162,7 +162,10 @@ def apply_command(streamer, cmd):
 
         elif t == "setpreset":
             # 手机端切换画质（中继模式下由电脑端本地编码）
+            changed = cmd.get("preset", "mid") != getattr(streamer, "preset", None)
             streamer.set_preset(cmd.get("preset", "mid"))
+            if changed and getattr(streamer, "health", None):
+                streamer.health.on_manual_preset(streamer.preset)  # 手动切档取消自动回升
         elif t == "setres":
             # 手机端自定义推流分辨率（"auto"=恢复跟随画质档位）
             v = cmd.get("scale", None)
