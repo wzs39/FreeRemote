@@ -286,6 +286,11 @@ async def _capture_loop(ws, streamer, monitor, loop):
             await _pace(loop, 1.0, t0)
             continue
         data = await loop.run_in_executor(None, streamer.capture)
+        if data == b"":
+            # DXGI 静止哨兵：跳过发送。空字节经中继转发后成为 Content-Length: 0
+            # 的 multipart part，手机端 <img> 当坏帧触发 error → 无限重载循环。
+            await _pace(loop, streamer.fps, t0)
+            continue
         if data == streamer._fallback:
             monitor.note_fail(Exception("capture returned fallback"))  # 占位图=采集失败
         monitor.maybe_heal(streamer)  # 自愈

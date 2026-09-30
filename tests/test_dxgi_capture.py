@@ -188,3 +188,39 @@ def test_framesource_health_on_error(env):
     got = s.capture_rgb()
     assert got is ERROR
     assert s.health.capture_fail == fails_before + 1
+
+
+# ---- 中继 MJPEG 上行（_capture_loop）：DXGI 静止帧不得外发 ----
+
+class FakeWS:
+    def __init__(self):
+        self.sent = []
+
+    async def send_bytes(self, data):
+        self.sent.append(data)
+
+
+def test_relay_capture_loop_skips_still_frames(env):
+    """中继 MJPEG 备胎：静止帧(b"")不下发——空字节经中继转发成
+    Content-Length: 0 的 multipart part，手机端 <img> 当坏帧触发无限重载。"""
+    from free_remote import relay
+
+    s, cam = env
+    cam.script = [frame_px(320, 200, 9), None, frame_px(320, 200, 8), None, None]
+    monitor = HealthMonitor(8)
+    ws = FakeWS()
+
+    async def drive():
+        task = asyncio.create_task(relay._capture_loop(ws, s, monitor, asyncio.get_running_loop()))
+        await asyncio.sleep(0.30)  # 8fps → 覆盖 5 次循环
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(asyncio.wait_for(drive(), timeout=3))
+    assert ws.sent, "真帧必须外发"
+    for data in ws.sent:
+        assert data != b""  # 空字节（静止哨兵）绝不上行
+        assert data[:2] == b"\xff\xd8"  # 且都是合法 JPEG
